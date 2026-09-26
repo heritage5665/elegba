@@ -855,7 +855,7 @@ elegba/
 | GitHub repo        | `elegba`                     |
 | Go module          | `github.com/<you>/elegba`    |
 | Binary             | `elegba`                     |
-| Docker image       | `<you>/elegba:latest`        |
+| Docker image       | `elegba:latest`        |
 | Helm chart         | `elegba`                     |
 | Config file        | `elegba.yaml`                |
 | Env var prefix     | `ELEGBA_`                    |
