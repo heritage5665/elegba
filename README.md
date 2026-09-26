@@ -27,7 +27,7 @@ Elegba is a config-driven API aggregator and Backend-for-Frontend (BFF) written 
 1. Clone the repository:
 
    ```
-   git clone https://github.com/<your-username>/elegba.git
+   git clone https://github.com/heritage5665/elegba.git
    cd elegba
    ```
 
