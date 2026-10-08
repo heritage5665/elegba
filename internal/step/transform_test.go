@@ -12,7 +12,7 @@ func TestTransformTemplateFunctions(t *testing.T) {
 	transform, err := NewTransformStep(config.Step{
 		ID:       "result",
 		Type:     "transform",
-		Template: `{"count": {{ len .items }}, "total": {{ sum .items }}, "next": {{ add .first 2 }}, "parsed": {{ fromJSON .raw | toJSON }}, "fallback": {{ .missing | default "none" | toJSON }}, "tokenHash": {{ sha256 "token" | toJSON }}, "mapped": {{ dict "user" .user | toJSON }}}`,
+		Template: `{"count": {{ len .items }}, "total": {{ sum .items }}, "next": {{ add .first 2 }}, "parsed": {{ fromJSON .raw | toJSON }}, "fallback": {{ .missing | default "none" | toJSON }}, "tokenHash": {{ sha256 "token" | toJSON }}, "mapped": {{ dict "user" .user | toJSON }}, "token": {{ replacePrefix .token "Bearer " "" | toJSON }}, "redacted": {{ redact .secret | toJSON }}}`,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -23,6 +23,8 @@ func TestTransformTemplateFunctions(t *testing.T) {
 		"raw":     `{"ok":true}`,
 		"missing": "",
 		"user":    map[string]any{"id": "42"},
+		"token":   "Bearer client-token",
+		"secret":  "super-secret",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -36,6 +38,12 @@ func TestTransformTemplateFunctions(t *testing.T) {
 	}
 	if !strings.Contains(gotString, `"mapped": {"user":{"id":"42"}}`) {
 		t.Fatalf("dict function missing from transformation: %s", gotString)
+	}
+	if !strings.Contains(gotString, `"token": "client-token"`) {
+		t.Fatalf("replacePrefix function missing from transformation: %s", gotString)
+	}
+	if !strings.Contains(gotString, `"redacted": "[REDACTED]"`) {
+		t.Fatalf("redact function missing from transformation: %s", gotString)
 	}
 }
 

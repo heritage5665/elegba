@@ -31,6 +31,22 @@ func TestValidateRejectsClientAuthCacheWithoutTokenHash(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsClientAuthCacheWithNonHashingTokenText(t *testing.T) {
+	cfg := validConfig()
+	upstream := cfg.Upstreams["users"]
+	upstream.Auth = AuthConfig{Type: "client", Header: "Authorization", Forward: "Authorization", Scheme: "Bearer"}
+	cfg.Upstreams["users"] = upstream
+	cfg.Endpoints[0].Pipeline[0].Cache = &CacheRef{
+		Backend: "memory",
+		Key:     "user:{{ .path.id }}:sha256-{{ .header.Authorization }}",
+		TTL:     Duration(time.Minute),
+	}
+
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "token hash") {
+		t.Fatalf("error = %v, want cache token hash validation error", err)
+	}
+}
+
 func TestValidateRejectsInvalidConfigurations(t *testing.T) {
 	tests := []struct {
 		name   string

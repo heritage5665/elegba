@@ -47,9 +47,23 @@ make run
 
 The example listens on `:8080`; try `http://localhost:8080/dashboard?id=1`. Set `CONFIG=path/to/config.yaml` to use another file.
 
+### Client Auth Worked Example
+
+The canonical `Client Auth & Worked Example` is runnable with Docker Compose:
+
+```bash
+docker compose up --build
+curl -H 'Authorization: Bearer demo-token' \
+  'http://localhost:8080/users/42/summary'
+```
+
+This starts Elegba plus mock user, ledger, and account services. See
+[docs/examples/user-summary.md](docs/examples/user-summary.md) for the complete
+walkthrough, expected response, cache safety rule, and failure modes.
+
 ### Configuration
 
-Configuration is strict YAML or JSON. Unknown fields and invalid references are rejected at startup. `${VAR}` requires a non-empty environment variable; `${VAR:-default}` supplies a fallback. The runnable example is in [examples/elegba.yaml](examples/elegba.yaml), and supported fields are documented in [docs/config-reference.md](docs/config-reference.md).
+Configuration is strict YAML or JSON. Unknown fields and invalid references are rejected at startup. `${VAR}` requires a non-empty environment variable; `${VAR:-default}` supplies a fallback. The runnable example is in [examples/elegba.yaml](examples/elegba.yaml), and the client-auth worked example is in [examples/user-summary.yaml](examples/user-summary.yaml). Supported fields are documented in [docs/config-reference.md](docs/config-reference.md).
 
 ### Documentation
 

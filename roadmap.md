@@ -4,6 +4,8 @@
 **Applies to:** Elegba v1.x → v2.x
 **Status:** Living document
 
+> **Status note:** Milestone statuses are updated from implementation evidence. A milestone is complete only when its implemented behavior is covered by code, tests, and/or documented validation; partial areas remain pending.
+
 This document describes the delivery roadmap for Elegba: what will be built,
 in what order, and why. It is organized into milestones, each with clear
 deliverables, acceptance criteria, and out-of-scope items.
@@ -130,6 +132,8 @@ Deprecated features are:
 
 ## 5. Milestone 1 — MVP
 
+**Status:** ✅ Implemented and validated
+
 **Goal:** A working aggregator that can fetch from multiple upstreams
 concurrently and transform the response.
 
@@ -222,6 +226,10 @@ concurrently and transform the response.
 
 ## 6. Milestone 1.5 — Client Auth & Worked Example
 
+**Status:** ✅ Complete — client-auth forwarding, cache isolation, template
+helpers, the canonical example, mock services, Docker Compose stack, and
+walkthrough are implemented and validated.
+
 **Goal:** Make the canonical multi-upstream example from `DESIGN.md` §16
 work end to end. This closes the gap between "MVP that fetches" and "MVP you
 can actually use behind a real BFF."
@@ -234,55 +242,55 @@ can actually use behind a real BFF."
 
 #### Client-Provided Auth
 
-- [ ] New auth type: `auth.type: client`.
-- [ ] Fields: `header`, `forward`, `scheme`.
-- [ ] Extract token from incoming request.
-- [ ] Strip existing scheme, re-add configured scheme.
-- [ ] Set the forward header on the upstream request.
-- [ ] Return `401 CLIENT_AUTH_MISSING` if the header is absent.
-- [ ] Redact `Authorization` (and any custom auth headers) in structured logs.
-- [ ] Metric: `elegba_client_auth_missing_total{upstream}`.
-- [ ] Unit tests for each scheme variant (`Bearer`, `Basic`, `""`).
-- [ ] Integration test: token is forwarded to the mock upstream.
+- [x] New auth type: `auth.type: client`.
+- [x] Fields: `header`, `forward`, `scheme`.
+- [x] Extract token from incoming request.
+- [x] Strip existing scheme, re-add configured scheme.
+- [x] Set the forward header on the upstream request.
+- [x] Return `401 CLIENT_AUTH_MISSING` if the header is absent.
+- [x] Redact `Authorization` (and any custom auth headers) in structured logs.
+- [x] Metric: `elegba_client_auth_missing_total{upstream}`.
+- [x] Unit tests for each scheme variant (`Bearer`, `Basic`, `""`).
+- [x] Integration test: token is forwarded to the mock upstream.
 
 #### Template Functions
 
 Add the following functions to `internal/transform/funcs.go`:
 
-- [ ] `dict` — build a map from key-value pairs.
-- [ ] `sha256` — hex-encoded SHA-256 of a string.
-- [ ] `replacePrefix` — remove a prefix from a string.
-- [ ] `redact` — redact a value for safe logging.
-- [ ] Unit tests for each function, including edge cases (empty input, unicode,
+- [x] `dict` — build a map from key-value pairs.
+- [x] `sha256` — hex-encoded SHA-256 of a string.
+- [x] `replacePrefix` — remove a prefix from a string.
+- [x] `redact` — redact a value for safe logging.
+- [x] Unit tests for each function, including edge cases (empty input, unicode,
       very long input).
-- [ ] Fuzz test: `FuzzTemplateRender` includes these functions.
+- [x] Fuzz test: `FuzzTemplateRender` includes these functions.
 
 #### Worked Example
 
-- [ ] `examples/user-summary.yaml` — the full config from `DESIGN.md` §16.
-- [ ] `examples/mock/main.go` — mock upstreams for user, ledger, and account.
-- [ ] `examples/user-summary.md` — walkthrough of the example, including
+- [x] `examples/user-summary.yaml` — the full config from `DESIGN.md` §16.
+- [x] `examples/mock/main.go` — mock upstreams for user, ledger, and account.
+- [x] `examples/user-summary.md` — walkthrough of the example, including
       expected output and failure modes.
-- [ ] `docker-compose.yml` — Elegba + three mock upstreams + Prometheus, so
+- [x] `docker-compose.yml` — Elegba + three mock upstreams + Prometheus, so
       the example runs with one command.
-- [ ] README quick-start uses this example.
+- [x] README quick-start uses this example.
 
 #### Cache Safety
 
-- [ ] Document the rule: cache keys MUST include a token hash when
+- [x] Document the rule: cache keys MUST include a token hash when
       `auth.type: client` is used.
-- [ ] Enforce at config load time: if `auth.type: client` is set on an
+- [x] Enforce at config load time: if `auth.type: client` is set on an
       upstream used by a `fetch` step with a cache, and the cache key does
       not contain the token (or a hash of it), fail with a clear error.
-- [ ] Test: two different tokens produce two different cache entries.
+- [x] Test: two different tokens produce two different cache entries.
 
 #### Docs
 
-- [ ] `DESIGN.md` §16 added.
-- [ ] `docs/config-reference.md` — `auth.type: client` fully documented.
-- [ ] `docs/architecture.md` — new "Auth flow" section covering static,
+- [x] `DESIGN.md` §16 added.
+- [x] `docs/config-reference.md` — `auth.type: client` fully documented.
+- [x] `docs/architecture.md` — new "Auth flow" section covering static,
       client, and exchanged modes.
-- [ ] `docs/examples/user-summary.md` — step-by-step walkthrough.
+- [x] `docs/examples/user-summary.md` — step-by-step walkthrough.
 
 ### Acceptance Criteria
 
@@ -311,6 +319,8 @@ caching. Without it, the MVP is a demo, not a tool.
 ---
 
 ## 7. Milestone 2 — Resilience
+
+**Status:** ✅ Implemented and validated
 
 **Goal:** Elegba survives upstream failures gracefully.
 
@@ -389,6 +399,8 @@ caching. Without it, the MVP is a demo, not a tool.
 
 ## 8. Milestone 3 — Observability
 
+**Status:** ✅ Implemented and validated
+
 **Goal:** Full observability for production operations.
 
 **Target:** v0.3.0
@@ -464,6 +476,8 @@ caching. Without it, the MVP is a demo, not a tool.
 
 ## 9. Milestone 4 — Caching
 
+**Status:** ✅ Implemented and validated
+
 **Goal:** Flexible, multi-backend caching.
 
 **Target:** v0.4.0
@@ -525,6 +539,8 @@ caching. Without it, the MVP is a demo, not a tool.
 ---
 
 ## 10. Milestone 5 — Hot Reload
+
+**Status:** ✅ Implemented and validated
 
 **Goal:** Reload config without dropping requests.
 
@@ -866,12 +882,12 @@ See `SECURITY.md`. Do not open a public issue.
 | Milestone | Version | Focus | Status |
 |-----------|---------|-------|--------|
 | 0 | — | Foundation | ✅ Complete |
-| 1 | v0.1.0 | MVP | 🚧 In progress |
-| 1.5 | v0.1.5 | Client Auth & Worked Example | ⏳ Planned |
-| 2 | v0.2.0 | Resilience | ⏳ Planned |
-| 3 | v0.3.0 | Observability | ⏳ Planned |
-| 4 | v0.4.0 | Caching | ⏳ Planned |
-| 5 | v0.5.0 | Hot Reload | ⏳ Planned |
+| 1 | v0.1.0 | MVP | ✅ Complete |
+| 1.5 | v0.1.5 | Client Auth & Worked Example | ✅ Complete |
+| 2 | v0.2.0 | Resilience | ✅ Complete |
+| 3 | v0.3.0 | Observability | ✅ Complete |
+| 4 | v0.4.0 | Caching | ✅ Complete |
+| 5 | v0.5.0 | Hot Reload | ✅ Complete |
 | 6 | v1.0.0 | Release | ⏳ Planned |
 | 7 | v1.x | Hardening | ⏳ Planned |
 | 8 | v2.0.0 | Next major | 💭 Exploratory |

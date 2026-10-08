@@ -1,0 +1,120 @@
+version: "1"
+
+server:
+  address: ":8080"
+  readTimeout: 5s
+  writeTimeout: 15s
+  idleTimeout: 120s
+  readHeaderTimeout: 5s
+  shutdownTimeout: 30s
+  maxBodyBytes: 1048576
+  admin:
+    address: ":9090"
+    enabled: true
+
+upstreams:
+  user-service:
+    transport: http
+    baseURL: ${USER_SERVICE_URL:-http://user-service:8080}
+    timeout: 2s
+    maxConcurrent: 100
+    retries: 2
+    retry:
+      initialInterval: 100ms
+      maxInterval: 1s
+      multiplier: 2.0
+      maxElapsedTime: 5s
+      jitter: true
+    breaker:
+      maxRequests: 5
+      interval: 60s
+      timeout: 30s
+      failureThreshold: 5
+    rateLimit: 200/s
+    auth:
+      type: client
+      header: Authorization
+      forward: Authorization
+      scheme: Bearer
+
+  ledger-service:
+    transport: http
+    baseURL: ${LEDGER_SERVICE_URL:-http://ledger-service:8080}
+    timeout: 3s
+    maxConcurrent: 100
+    retries: 2
+    breaker:
+      failureThreshold: 5
+    rateLimit: 200/s
+    auth:
+      type: client
+      header: Authorization
+      forward: Authorization
+      scheme: Bearer
+
+  account-service:
+    transport: http
+    baseURL: ${ACCOUNT_SERVICE_URL:-http://account-service:8080}
+    timeout: 2s
+    maxConcurrent: 100
+    retries: 3
+    breaker:
+      failureThreshold: 3
+    rateLimit: 200/s
+    auth:
+      type: client
+      header: Authorization
+      forward: Authorization
+      scheme: Bearer
+
+caches:
+  memory:
+    type: in-memory
+    maxSize: 10000
+    defaultTTL: 60s
+
+endpoints:
+  - path: /users/{userId}/summary
+    method: GET
+    timeout: 8s
+    maxConcurrent: 200
+    failFast: false
+    pipeline:
+      - id: user
+        type: fetch
+        upstream: user-service
+        path: /users/{{ .path.userId }}
+        method: GET
+        cache:
+          backend: memory
+          key: "user:{{ .path.userId }}:{{ .header.Authorization | sha256 }}"
+          ttl: 60s
+          staleWhileRevalidate: true
+
+      - id: ledger
+        type: fetch
+        upstream: ledger-service
+        path: /ledger/accounts/{{ .path.userId }}
+        method: GET
+
+      - id: account
+        type: fetch
+        upstream: account-service
+        path: /accounts/{{ .path.userId }}/flags
+        method: GET
+        onError: fallback
+        fallback:
+          static: '{"has_pnd": false, "has_lien": false}'
+
+      - id: summary
+        type: transform
+        dependsOn: [user, ledger, account]
+        template: |
+          {{ dict
+              "user_id"            .user.id
+              "user_status"        .user.user_status
+              "user_onboarded_on"  .user.date_create
+              "account_balance"    .ledger.ledger_balance
+              "account_has_pnd"    .account.has_pnd
+              "account_has_lien"   .account.has_lien
+            | toJSON }}
