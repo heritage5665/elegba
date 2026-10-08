@@ -106,6 +106,7 @@ func (s *Server) Watch(ctx context.Context, path string, debounce time.Duration)
 	s.mu.Lock()
 	if s.watchCancel != nil {
 		s.mu.Unlock()
+		cancel()
 		_ = watcher.Close()
 		return errors.New("configuration watcher already running")
 	}

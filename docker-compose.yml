@@ -1,0 +1,45 @@
+services:
+  user-service:
+    build:
+      context: ./examples/mock
+    command: ["-address", ":8080", "-service", "user"]
+    ports:
+      - "8081:8080"
+
+  ledger-service:
+    build:
+      context: ./examples/mock
+    command: ["-address", ":8080", "-service", "ledger"]
+    ports:
+      - "8082:8080"
+
+  account-service:
+    build:
+      context: ./examples/mock
+    command: ["-address", ":8080", "-service", "account"]
+    ports:
+      - "8083:8080"
+
+  elegba:
+    build:
+      context: .
+    command: ["--config", "/config/user-summary.yaml"]
+    environment:
+      USER_SERVICE_URL: http://user-service:8080
+      LEDGER_SERVICE_URL: http://ledger-service:8080
+      ACCOUNT_SERVICE_URL: http://account-service:8080
+    volumes:
+      - ./examples/user-summary.yaml:/config/user-summary.yaml:ro
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+    depends_on:
+      - user-service
+      - ledger-service
+      - account-service
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus"]
+    ports:
+      - "9091:9090"

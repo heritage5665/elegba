@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"strings"
 	"text/template"
 
 	"github.com/elegba-dev/elegba/internal/config"
@@ -120,6 +121,18 @@ func templateFunctions() template.FuncMap {
 		"sha256": func(value string) string {
 			digest := sha256.Sum256([]byte(value))
 			return hex.EncodeToString(digest[:])
+		},
+		"replacePrefix": func(value, prefix, replacement string) string {
+			if strings.HasPrefix(value, prefix) {
+				return replacement + strings.TrimPrefix(value, prefix)
+			}
+			return value
+		},
+		"redact": func(value string) string {
+			if value == "" {
+				return ""
+			}
+			return "[REDACTED]"
 		},
 	}
 }

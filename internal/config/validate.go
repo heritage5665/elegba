@@ -88,7 +88,7 @@ func (c *Config) Validate() error {
 				continue
 			}
 			cacheKey := step.Cache.Key
-			if !strings.Contains(cacheKey, "sha256") || !strings.Contains(cacheKey, "header."+upstream.Auth.Header) {
+			if !cacheKeyHashesClientToken(cacheKey, upstream.Auth.Header) {
 				return fmt.Errorf("step %q cache key must include a token hash", step.ID)
 			}
 		}
@@ -234,6 +234,20 @@ func (c *Config) Validate() error {
 		}
 	}
 	return nil
+}
+
+func cacheKeyHashesClientToken(cacheKey, header string) bool {
+	input := ".header." + header
+	for _, action := range strings.Split(cacheKey, "{{") {
+		if strings.Contains(action, "}}") {
+			action = strings.SplitN(action, "}}", 2)[0]
+		}
+		if strings.Contains(action, input) &&
+			(strings.Contains(action, "| sha256") || strings.Contains(action, "sha256 "+input)) {
+			return true
+		}
+	}
+	return false
 }
 
 func ValidateRateLimit(value string) error {

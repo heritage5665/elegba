@@ -95,6 +95,29 @@ func TestServerWatchReloadsConfigFromFile(t *testing.T) {
 	t.Fatal("configuration file event did not reload the engine")
 }
 
+func TestServerRejectsDuplicateWatcher(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "elegba.yaml")
+	writeReloadConfig(t, configPath, "http://example.test", "/data")
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := server.Watch(ctx, configPath, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.Watch(ctx, configPath, time.Second); err == nil {
+		t.Fatal("expected duplicate watcher to fail")
+	}
+}
+
 func TestServerRejectsInvalidReloadWithoutReplacingCurrentEngine(t *testing.T) {
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
