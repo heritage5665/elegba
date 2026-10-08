@@ -1,0 +1,247 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://elegba.dev/schema/v1/elegba.schema.json",
+  "title": "Elegba Configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "endpoints"],
+  "properties": {
+    "version": { "type": "string", "const": "1" },
+    "server": { "$ref": "#/$defs/server" },
+    "upstreams": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/upstream" }
+    },
+    "caches": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/cache" }
+    },
+    "tracing": { "$ref": "#/$defs/tracing" },
+    "endpoints": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/endpoint" }
+    }
+  },
+  "$defs": {
+    "duration": {
+      "type": "string",
+      "pattern": "^[0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h)$",
+      "description": "Go duration such as 250ms or 2s."
+    },
+    "server": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "address": { "type": "string", "default": ":8080" },
+        "readTimeout": { "$ref": "#/$defs/duration", "default": "5s" },
+        "writeTimeout": { "$ref": "#/$defs/duration", "default": "10s" },
+        "idleTimeout": { "$ref": "#/$defs/duration", "default": "120s" },
+        "readHeaderTimeout": { "$ref": "#/$defs/duration", "default": "5s" },
+        "shutdownTimeout": { "$ref": "#/$defs/duration", "default": "30s" },
+        "readinessTimeout": { "$ref": "#/$defs/duration", "default": "5s" },
+        "admin": { "$ref": "#/$defs/admin" },
+        "maxBodyBytes": { "type": "integer", "minimum": 1, "default": 1048576 }
+      }
+    },
+    "admin": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "address": { "type": "string", "default": ":9090" },
+        "enabled": { "type": "boolean", "default": false }
+      }
+    },
+    "tracing": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean", "default": false },
+        "endpoint": { "type": "string", "format": "uri", "pattern": "^https?://" },
+        "insecure": { "type": "boolean", "default": false },
+        "serviceName": { "type": "string", "default": "elegba" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "enabled": { "const": true } }, "required": ["enabled"] },
+          "then": { "required": ["endpoint"] }
+        }
+      ]
+    },
+    "upstream": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["baseURL"],
+      "properties": {
+        "baseURL": { "type": "string", "format": "uri", "pattern": "^https?://" },
+        "timeout": { "$ref": "#/$defs/duration", "default": "2s" },
+        "maxResponseBytes": { "type": "integer", "minimum": 1, "default": 10485760 },
+        "maxConcurrent": { "type": "integer", "minimum": 1, "default": 100 },
+        "connectionPool": { "$ref": "#/$defs/connectionPool" },
+        "retries": { "type": "integer", "minimum": 0, "default": 2 },
+        "retry": { "$ref": "#/$defs/retry" },
+        "breaker": { "$ref": "#/$defs/breaker" },
+        "rateLimit": { "type": "string", "pattern": "^[1-9][0-9]*/(s|m|h)$" },
+        "headers": { "type": "object", "additionalProperties": { "type": "string" } },
+        "auth": { "$ref": "#/$defs/auth" }
+      }
+    },
+    "connectionPool": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxIdleConns": { "type": "integer", "minimum": 0, "default": 100 },
+        "maxIdleConnsPerHost": { "type": "integer", "minimum": 0, "default": 100 },
+        "idleConnTimeout": { "$ref": "#/$defs/duration", "default": "90s" }
+      }
+    },
+    "retry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "initialInterval": { "$ref": "#/$defs/duration", "default": "100ms" },
+        "maxInterval": { "$ref": "#/$defs/duration", "default": "2s" },
+        "multiplier": { "type": "number", "minimum": 1, "default": 2 },
+        "maxElapsedTime": { "$ref": "#/$defs/duration", "default": "10s" },
+        "jitter": { "type": "boolean", "default": true }
+      }
+    },
+    "breaker": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxRequests": { "type": "integer", "minimum": 1, "default": 5 },
+        "interval": { "$ref": "#/$defs/duration", "default": "60s" },
+        "timeout": { "$ref": "#/$defs/duration", "default": "30s" },
+        "failureThreshold": { "type": "integer", "minimum": 1, "default": 5 }
+      }
+    },
+    "auth": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "enum": ["bearer", "basic", "apikey"] },
+        "token": { "type": "string" },
+        "username": { "type": "string" },
+        "password": { "type": "string" },
+        "key": { "type": "string" },
+        "header": { "type": "string", "default": "X-API-Key" }
+      }
+    },
+    "cache": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "enum": ["in-memory", "redis"], "default": "in-memory" },
+        "maxSize": { "type": "integer", "minimum": 1, "default": 10000 },
+        "defaultTTL": { "$ref": "#/$defs/duration", "default": "60s" },
+        "address": { "type": "string" },
+        "username": { "type": "string" },
+        "password": { "type": "string" },
+        "db": { "type": "integer", "minimum": 0, "default": 0 },
+        "poolSize": { "type": "integer", "minimum": 1, "default": 10 },
+        "maxRetries": { "type": "integer", "minimum": 0, "default": 3 },
+        "dialTimeout": { "$ref": "#/$defs/duration", "default": "5s" },
+        "readTimeout": { "$ref": "#/$defs/duration", "default": "3s" },
+        "writeTimeout": { "$ref": "#/$defs/duration", "default": "3s" },
+        "tls": { "$ref": "#/$defs/redisTLS" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "redis" } }, "required": ["type"] },
+          "then": { "required": ["address"] }
+        }
+      ]
+    },
+    "redisTLS": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "caFile": { "type": "string" },
+        "certFile": { "type": "string" },
+        "keyFile": { "type": "string" },
+        "insecureSkipVerify": { "type": "boolean", "default": false },
+        "serverName": { "type": "string" }
+      }
+    },
+    "endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "pipeline"],
+      "properties": {
+        "path": { "type": "string", "pattern": "^/", "description": "Supports {name} path segments." },
+        "method": { "type": "string", "default": "GET" },
+        "timeout": { "$ref": "#/$defs/duration" },
+        "maxConcurrent": { "type": "integer", "minimum": 1, "default": 100 },
+        "failFast": { "type": "boolean", "default": false },
+        "cacheInvalidate": { "type": "array", "items": { "type": "string" }, "default": [] },
+        "pipeline": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/step" } }
+      }
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "type": { "type": "string", "enum": ["fetch", "transform", "cache"] },
+        "dependsOn": { "type": "array", "items": { "type": "string" } },
+        "upstream": { "type": "string" },
+        "path": { "type": "string" },
+        "method": { "type": "string", "default": "GET" },
+        "headers": { "type": "object", "additionalProperties": { "type": "string" } },
+        "body": { "type": "string" },
+        "template": { "type": "string" },
+        "cache": { "$ref": "#/$defs/stepCache" },
+        "action": { "type": "string", "enum": ["get", "set", "delete"] },
+        "backend": { "type": "string" },
+        "key": { "type": "string" },
+        "value": { "type": "string" },
+        "ttl": { "$ref": "#/$defs/duration" },
+        "timeout": { "$ref": "#/$defs/duration" },
+        "onError": { "type": "string", "enum": ["fail", "ignore", "fallback"], "default": "fail" },
+        "fallback": { "$ref": "#/$defs/fallback" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "fetch" } } },
+          "then": { "required": ["upstream"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "transform" } } },
+          "then": { "required": ["template"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "cache" } } },
+          "then": { "required": ["action", "backend", "key"] }
+        },
+        {
+          "if": { "properties": { "onError": { "const": "fallback" } }, "required": ["onError"] },
+          "then": { "required": ["fallback"] }
+        }
+      ]
+    },
+    "fallback": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "maxProperties": 1,
+      "properties": {
+        "static": { "type": "string", "description": "Static JSON value." },
+        "upstream": { "type": "string" },
+        "cacheKey": { "type": "string" }
+      }
+    },
+    "stepCache": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["backend", "key"],
+      "properties": {
+        "backend": { "type": "string" },
+        "key": { "type": "string" },
+        "ttl": { "$ref": "#/$defs/duration" },
+        "staleWhileRevalidate": { "type": "boolean", "default": false }
+      }
+    }
+  }
+}

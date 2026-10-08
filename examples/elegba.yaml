@@ -1,0 +1,54 @@
+# examples/elegba.yaml
+
+version: "1"
+
+server:
+  address: ":8080"
+
+upstreams:
+  users:
+    baseURL: https://jsonplaceholder.typicode.com
+    timeout: 2s
+    maxConcurrent: 100
+    connectionPool:
+      maxIdleConns: 100
+      maxIdleConnsPerHost: 100
+      idleConnTimeout: 90s
+    retries: 2
+    retry:
+      initialInterval: 100ms
+      maxInterval: 2s
+      multiplier: 2
+      maxElapsedTime: 10s
+      jitter: true
+    breaker:
+      maxRequests: 5
+      interval: 60s
+      timeout: 30s
+      failureThreshold: 5
+    rateLimit: 100/s
+
+caches:
+  memory:
+    type: in-memory
+    maxSize: 10000
+    defaultTTL: 60s
+
+endpoints:
+  - path: /dashboard
+    method: GET
+    maxConcurrent: 50
+    pipeline:
+      - id: user
+        type: fetch
+        upstream: users
+        path: /users/{{ .query.id }}
+        cache:
+          backend: memory
+          ttl: 60s
+          key: "user:{{ .query.id }}"
+      - id: combined
+        type: transform
+        dependsOn: [user]
+        template: |
+          {"user": {{ .user | toJSON }}}
