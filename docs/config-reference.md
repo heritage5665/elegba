@@ -250,6 +250,10 @@ upstreams:
     timeout: 2s
     maxResponseBytes: 10485760
     maxConcurrent: 100
+    connectionPool:
+      maxIdleConns: 100
+      maxIdleConnsPerHost: 100
+      idleConnTimeout: 90s
     retries: 2
     retry:
       initialInterval: 100ms
@@ -288,6 +292,7 @@ upstreams:
 | `timeout` | duration | no | `2s` | Per-request timeout. |
 | `maxResponseBytes` | int64 | no | `10485760` (10 MB) | Max response body size. |
 | `maxConcurrent` | int | no | `100` | Max concurrent requests. |
+| `connectionPool` | object | no | defaults below | Connection pooling settings for this upstream's HTTP transport. |
 | `retries` | int | no | `2` | Number of retry attempts (in addition to the first). |
 | `retry` | object | no | — | Retry policy (§6.1). |
 | `breaker` | object | no | — | Circuit breaker config (§6.2). |

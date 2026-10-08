@@ -28,12 +28,18 @@ func (c *Config) Validate() error {
 		}
 	}
 	for name, upstream := range c.Upstreams {
+		if upstream.Transport != "" && upstream.Transport != "http" {
+			return fmt.Errorf("upstream %q has unsupported transport %q", name, upstream.Transport)
+		}
 		parsed, err := url.ParseRequestURI(upstream.BaseURL)
 		if err != nil || parsed.Scheme != "http" && parsed.Scheme != "https" || parsed.Host == "" {
 			return fmt.Errorf("upstream %q has invalid absolute HTTP baseURL %q", name, upstream.BaseURL)
 		}
 		if upstream.Timeout < 0 || upstream.MaxResponseBytes <= 0 || upstream.MaxConcurrent < 0 {
 			return fmt.Errorf("upstream %q timeout must be non-negative and maxResponseBytes and maxConcurrent must be positive", name)
+		}
+		if upstream.ConnectionPool.MaxIdleConns < 0 || upstream.ConnectionPool.MaxIdleConnsPerHost < 0 || upstream.ConnectionPool.IdleConnTimeout < 0 {
+			return fmt.Errorf("upstream %q connectionPool values must be non-negative", name)
 		}
 		if upstream.Retries != nil && *upstream.Retries < 0 {
 			return fmt.Errorf("upstream %q retries must be non-negative", name)
@@ -52,7 +58,7 @@ func (c *Config) Validate() error {
 			}
 		}
 		switch upstream.Auth.Type {
-		case "", "bearer", "basic", "apikey":
+		case "", "bearer", "basic", "apikey", "client":
 		default:
 			return fmt.Errorf("upstream %q has unsupported auth type %q", name, upstream.Auth.Type)
 		}
@@ -64,6 +70,27 @@ func (c *Config) Validate() error {
 		}
 		if upstream.Auth.Type == "apikey" && upstream.Auth.Key == "" {
 			return fmt.Errorf("upstream %q apikey auth requires a key", name)
+		}
+		if upstream.Auth.Type == "client" && upstream.Auth.Header == "" {
+			return fmt.Errorf("upstream %q client auth requires an incoming header", name)
+		}
+		if upstream.Auth.Type == "client" && upstream.Auth.Forward == "" {
+			return fmt.Errorf("upstream %q client auth requires an outgoing forward header", name)
+		}
+	}
+	for _, endpoint := range c.Endpoints {
+		for _, step := range endpoint.Pipeline {
+			if step.Type != "fetch" || step.Cache == nil {
+				continue
+			}
+			upstream, ok := c.Upstreams[step.Upstream]
+			if !ok || upstream.Auth.Type != "client" {
+				continue
+			}
+			cacheKey := step.Cache.Key
+			if !strings.Contains(cacheKey, "sha256") || !strings.Contains(cacheKey, "header."+upstream.Auth.Header) {
+				return fmt.Errorf("step %q cache key must include a token hash", step.ID)
+			}
 		}
 	}
 	for name, cache := range c.Caches {

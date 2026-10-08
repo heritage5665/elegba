@@ -46,3 +46,24 @@ func TestHTTPTransportHonorsCanceledContext(t *testing.T) {
 		t.Fatal("expected canceled request error")
 	}
 }
+
+func TestHTTPTransportConfiguresConnectionPool(t *testing.T) {
+	transport := NewHTTPTransport(time.Second, HTTPTransportOptions{
+		MaxIdleConns:        25,
+		MaxIdleConnsPerHost: 5,
+		IdleConnTimeout:     30 * time.Second,
+	})
+	pool, ok := transport.client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("HTTP transport = %T, want *http.Transport", transport.client.Transport)
+	}
+	if pool.MaxIdleConns != 25 {
+		t.Fatalf("MaxIdleConns = %d, want 25", pool.MaxIdleConns)
+	}
+	if pool.MaxIdleConnsPerHost != 5 {
+		t.Fatalf("MaxIdleConnsPerHost = %d, want 5", pool.MaxIdleConnsPerHost)
+	}
+	if pool.IdleConnTimeout != 30*time.Second {
+		t.Fatalf("IdleConnTimeout = %s, want 30s", pool.IdleConnTimeout)
+	}
+}

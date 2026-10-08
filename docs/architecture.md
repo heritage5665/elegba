@@ -1562,5 +1562,3 @@ Response
 ```
 
 ---
-
-*End of architecture document.*

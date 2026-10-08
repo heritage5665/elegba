@@ -224,9 +224,34 @@ func TestApplyAuthModes(t *testing.T) {
 		{auth: config.AuthConfig{Type: "apikey", Header: "X-Key", Key: "key"}, header: "X-Key", want: "key"},
 	} {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		applyAuth(req, test.auth)
+		applyAuth(req, test.auth, nil)
 		if got := req.Header.Get(test.header); got != test.want {
 			t.Fatalf("%s: expected %q, got %q", test.auth.Type, test.want, got)
 		}
+	}
+}
+
+func TestApplyClientAuthForwardsNormalizedToken(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.Header.Set("Authorization", "Bearer client-token")
+	data := map[string]any{"headers": map[string]any{"Authorization": "Bearer client-token"}}
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	if err := applyAuth(req, config.AuthConfig{Type: "client", Header: "Authorization", Forward: "X-Upstream-Authorization", Scheme: "Bearer"}, data); err != nil {
+		t.Fatal(err)
+	}
+	if got := req.Header.Get("X-Upstream-Authorization"); got != "Bearer client-token" {
+		t.Fatalf("forwarded header = %q, want %q", got, "Bearer client-token")
+	}
+	if req.Header.Get("Authorization") != "" {
+		t.Fatalf("client credentials must not be forwarded to an unrelated header: %q", req.Header.Get("Authorization"))
+	}
+}
+
+func TestApplyClientAuthRejectsMissingToken(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	err := applyAuth(req, config.AuthConfig{Type: "client", Header: "Authorization", Forward: "Authorization", Scheme: "Bearer"}, map[string]any{"headers": map[string]any{}})
+	if !errors.Is(err, ErrClientAuthMissing) {
+		t.Fatalf("error = %v, want ErrClientAuthMissing", err)
 	}
 }

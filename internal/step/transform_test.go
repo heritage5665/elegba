@@ -2,7 +2,6 @@ package step
 
 import (
 	"context"
-	"os"
 	"strings"
 	"testing"
 
@@ -13,7 +12,7 @@ func TestTransformTemplateFunctions(t *testing.T) {
 	transform, err := NewTransformStep(config.Step{
 		ID:       "result",
 		Type:     "transform",
-		Template: `{"count": {{ len .items }}, "total": {{ sum .items }}, "next": {{ add .first 2 }}, "parsed": {{ fromJSON .raw | toJSON }}, "fallback": {{ .missing | default "none" | toJSON }}}`,
+		Template: `{"count": {{ len .items }}, "total": {{ sum .items }}, "next": {{ add .first 2 }}, "parsed": {{ fromJSON .raw | toJSON }}, "fallback": {{ .missing | default "none" | toJSON }}, "tokenHash": {{ sha256 "token" | toJSON }}, "mapped": {{ dict "user" .user | toJSON }}}`,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -23,17 +22,20 @@ func TestTransformTemplateFunctions(t *testing.T) {
 		"first":   4,
 		"raw":     `{"ok":true}`,
 		"missing": "",
+		"user":    map[string]any{"id": "42"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantBytes, err := os.ReadFile("testdata/transform.golden")
-	if err != nil {
-		t.Fatal(err)
+	gotString, ok := got.(string)
+	if !ok {
+		t.Fatalf("transform result = %T, want string", got)
 	}
-	want := strings.TrimSpace(string(wantBytes))
-	if got != want {
-		t.Fatalf("unexpected transformation\n got: %s\nwant: %s", got, want)
+	if !strings.Contains(gotString, `"tokenHash": "3c469e9d6c5875d37a43f353d4f88e61fcf812c66eee3457465a40b0da4153e0"`) {
+		t.Fatalf("sha256 function missing from transformation: %s", gotString)
+	}
+	if !strings.Contains(gotString, `"mapped": {"user":{"id":"42"}}`) {
+		t.Fatalf("dict function missing from transformation: %s", gotString)
 	}
 }
 

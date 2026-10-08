@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sort"
 
+	"github.com/elegba-dev/elegba/internal/step"
 	"github.com/elegba-dev/elegba/internal/transport"
 )
 
@@ -35,6 +36,8 @@ func pipelineErrorStatus(err error) (int, string, string) {
 		return http.StatusGatewayTimeout, "UPSTREAM_TIMEOUT", "pipeline execution timed out"
 	case errors.Is(err, transport.ErrCircuitBreakerOpen):
 		return http.StatusServiceUnavailable, "CIRCUIT_OPEN", "upstream circuit breaker is open"
+	case errors.Is(err, step.ErrClientAuthMissing):
+		return http.StatusUnauthorized, "CLIENT_AUTH_MISSING", "client authentication header is missing"
 	case errors.Is(err, transport.ErrRetryExhausted), errors.Is(err, transport.ErrUpstreamFailure):
 		return http.StatusBadGateway, "UPSTREAM_FAILURE", "upstream request failed"
 	default:

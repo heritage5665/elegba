@@ -34,16 +34,24 @@ type TracingConfig struct {
 }
 
 type Upstream struct {
+	Transport        string            `yaml:"transport" json:"transport"`
 	BaseURL          string            `yaml:"baseURL" json:"baseURL"`
 	Timeout          Duration          `yaml:"timeout" json:"timeout"`
 	MaxResponseBytes int64             `yaml:"maxResponseBytes" json:"maxResponseBytes"`
 	MaxConcurrent    int               `yaml:"maxConcurrent" json:"maxConcurrent"`
+	ConnectionPool   ConnectionPool    `yaml:"connectionPool" json:"connectionPool"`
 	Retries          *int              `yaml:"retries" json:"retries"`
 	Retry            RetryConfig       `yaml:"retry" json:"retry"`
 	Breaker          *BreakerConfig    `yaml:"breaker" json:"breaker"`
 	RateLimit        string            `yaml:"rateLimit" json:"rateLimit"`
 	Headers          map[string]string `yaml:"headers" json:"headers"`
 	Auth             AuthConfig        `yaml:"auth" json:"auth"`
+}
+
+type ConnectionPool struct {
+	MaxIdleConns        int      `yaml:"maxIdleConns" json:"maxIdleConns"`
+	MaxIdleConnsPerHost int      `yaml:"maxIdleConnsPerHost" json:"maxIdleConnsPerHost"`
+	IdleConnTimeout     Duration `yaml:"idleConnTimeout" json:"idleConnTimeout"`
 }
 
 type RetryConfig struct {
@@ -62,12 +70,14 @@ type BreakerConfig struct {
 }
 
 type AuthConfig struct {
-	Type   string `yaml:"type" json:"type"`
-	Token  string `yaml:"token" json:"token"`
-	User   string `yaml:"username" json:"username"`
-	Pass   string `yaml:"password" json:"password"`
-	Key    string `yaml:"key" json:"key"`
-	Header string `yaml:"header" json:"header"`
+	Type    string `yaml:"type" json:"type"`
+	Token   string `yaml:"token" json:"token"`
+	User    string `yaml:"username" json:"username"`
+	Pass    string `yaml:"password" json:"password"`
+	Key     string `yaml:"key" json:"key"`
+	Header  string `yaml:"header" json:"header"`
+	Forward string `yaml:"forward" json:"forward"`
+	Scheme  string `yaml:"scheme" json:"scheme"`
 }
 
 type Cache struct {

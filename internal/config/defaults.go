@@ -3,10 +3,13 @@ package config
 import "time"
 
 const (
-	DefaultTimeout          = 2 * time.Second
-	DefaultMaxResponseBytes = 10 << 20
-	DefaultMaxBodyBytes     = 1 << 20
-	DefaultShutdownTimeout  = 30 * time.Second
+	DefaultTimeout             = 2 * time.Second
+	DefaultMaxResponseBytes    = 10 << 20
+	DefaultMaxBodyBytes        = 1 << 20
+	DefaultShutdownTimeout     = 30 * time.Second
+	DefaultMaxIdleConns        = 100
+	DefaultMaxIdleConnsPerHost = 100
+	DefaultIdleConnTimeout     = 90 * time.Second
 )
 
 func NewConfig() *Config {
@@ -101,6 +104,9 @@ func (c *Config) ApplyDefaults() {
 		c.Caches[name] = cache
 	}
 	for name, upstream := range c.Upstreams {
+		if upstream.Transport == "" {
+			upstream.Transport = "http"
+		}
 		if upstream.Timeout == 0 {
 			upstream.Timeout = Duration(DefaultTimeout)
 		}
@@ -112,6 +118,15 @@ func (c *Config) ApplyDefaults() {
 		}
 		if upstream.MaxConcurrent == 0 {
 			upstream.MaxConcurrent = 100
+		}
+		if upstream.ConnectionPool.MaxIdleConns == 0 {
+			upstream.ConnectionPool.MaxIdleConns = DefaultMaxIdleConns
+		}
+		if upstream.ConnectionPool.MaxIdleConnsPerHost == 0 {
+			upstream.ConnectionPool.MaxIdleConnsPerHost = DefaultMaxIdleConnsPerHost
+		}
+		if upstream.ConnectionPool.IdleConnTimeout == 0 {
+			upstream.ConnectionPool.IdleConnTimeout = Duration(DefaultIdleConnTimeout)
 		}
 		if upstream.Retries == nil {
 			retries := 2
@@ -132,6 +147,15 @@ func (c *Config) ApplyDefaults() {
 		if upstream.Retry.Jitter == nil {
 			jitter := true
 			upstream.Retry.Jitter = &jitter
+		}
+		if upstream.Auth.Header == "" {
+			upstream.Auth.Header = "Authorization"
+		}
+		if upstream.Auth.Forward == "" {
+			upstream.Auth.Forward = upstream.Auth.Header
+		}
+		if upstream.Auth.Scheme == "" && upstream.Auth.Type == "client" {
+			upstream.Auth.Scheme = "Bearer"
 		}
 		if upstream.Breaker != nil {
 			if upstream.Breaker.MaxRequests == 0 {

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -15,6 +16,18 @@ func validConfig() *Config {
 			"memory": {Type: "in-memory", MaxSize: 100, DefaultTTL: Duration(time.Minute)},
 		},
 		Endpoints: []Endpoint{{Path: "/users/{id}", Method: "GET", Pipeline: []Step{{ID: "user", Type: "fetch", Upstream: "users"}}}},
+	}
+}
+
+func TestValidateRejectsClientAuthCacheWithoutTokenHash(t *testing.T) {
+	cfg := validConfig()
+	upstream := cfg.Upstreams["users"]
+	upstream.Auth = AuthConfig{Type: "client", Header: "Authorization", Forward: "Authorization", Scheme: "Bearer"}
+	cfg.Upstreams["users"] = upstream
+	cfg.Endpoints[0].Pipeline[0].Cache = &CacheRef{Backend: "memory", Key: "user:{{ .path.id }}", TTL: Duration(time.Minute)}
+
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "token hash") {
+		t.Fatalf("error = %v, want cache token hash validation error", err)
 	}
 }
 
@@ -160,7 +173,7 @@ func TestApplyDefaultsResilienceValues(t *testing.T) {
 	cfg := validConfig()
 	cfg.ApplyDefaults()
 	upstream := cfg.Upstreams["users"]
-	if upstream.MaxConcurrent != 100 || upstream.Retries == nil || *upstream.Retries != 2 || upstream.Retry.InitialInterval != Duration(100*time.Millisecond) || upstream.Retry.MaxElapsedTime != Duration(10*time.Second) || upstream.Retry.Jitter == nil || !*upstream.Retry.Jitter {
+	if upstream.MaxConcurrent != 100 || upstream.ConnectionPool.MaxIdleConns != 100 || upstream.ConnectionPool.MaxIdleConnsPerHost != 100 || upstream.ConnectionPool.IdleConnTimeout != Duration(90*time.Second) || upstream.Retries == nil || *upstream.Retries != 2 || upstream.Retry.InitialInterval != Duration(100*time.Millisecond) || upstream.Retry.MaxElapsedTime != Duration(10*time.Second) || upstream.Retry.Jitter == nil || !*upstream.Retry.Jitter {
 		t.Fatalf("unexpected upstream defaults: %#v", upstream)
 	}
 	if cfg.Endpoints[0].Timeout != Duration(10*time.Second) || cfg.Endpoints[0].MaxConcurrent != 100 || cfg.Endpoints[0].Pipeline[0].OnError != "fail" {

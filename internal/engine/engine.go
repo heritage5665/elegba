@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	cachebackend "github.com/elegba-dev/elegba/internal/cache"
@@ -26,11 +27,14 @@ import (
 )
 
 type Engine struct {
-	config  *config.Config
-	router  *Router
-	caches  map[string]cachebackend.Cache
-	metrics *observability.Metrics
-	tracer  trace.Tracer
+	config      *config.Config
+	router      *Router
+	caches      map[string]cachebackend.Cache
+	metrics     *observability.Metrics
+	tracer      trace.Tracer
+	lifecycleMu sync.Mutex
+	active      sync.WaitGroup
+	closed      bool
 }
 
 func New(cfg *config.Config) (*Engine, error) {
@@ -87,7 +91,12 @@ func New(cfg *config.Config) (*Engine, error) {
 				FailureThreshold: upstream.Breaker.FailureThreshold,
 			}
 		}
-		base := httptransport.NewHTTPTransport(time.Duration(upstream.Timeout))
+		pool := upstream.ConnectionPool
+		base := httptransport.NewHTTPTransport(time.Duration(upstream.Timeout), httptransport.HTTPTransportOptions{
+			MaxIdleConns:        pool.MaxIdleConns,
+			MaxIdleConnsPerHost: pool.MaxIdleConnsPerHost,
+			IdleConnTimeout:     time.Duration(pool.IdleConnTimeout),
+		})
 		resilient, err := httptransport.NewResilientTransport(name, base, httptransport.ResilienceOptions{
 			Retries: retry, Breaker: breaker, RateLimit: upstream.RateLimit, MaxConcurrent: upstream.MaxConcurrent, Metrics: metrics,
 		})
@@ -183,9 +192,43 @@ func New(cfg *config.Config) (*Engine, error) {
 }
 
 func (e *Engine) Close() {
+	e.Drain(context.Background())
+}
+
+func (e *Engine) Drain(ctx context.Context) {
+	e.lifecycleMu.Lock()
+	if !e.closed {
+		e.closed = true
+	}
+	e.lifecycleMu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		e.active.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		slog.Warn("engine drain timed out; closing cached resources", "error", ctx.Err())
+	}
 	for _, backend := range e.caches {
 		backend.Close()
 	}
+}
+
+func (e *Engine) beginRequest() bool {
+	e.lifecycleMu.Lock()
+	defer e.lifecycleMu.Unlock()
+	if e.closed {
+		return false
+	}
+	e.active.Add(1)
+	return true
+}
+
+func (e *Engine) endRequest() {
+	e.active.Done()
 }
 
 func (e *Engine) MetricsHandler() http.Handler {
@@ -193,6 +236,11 @@ func (e *Engine) MetricsHandler() http.Handler {
 }
 
 func (e *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	if !e.beginRequest() {
+		writeAPIError(w, http.StatusServiceUnavailable, "ENGINE_CLOSED", "the active engine is being replaced", "")
+		return
+	}
+	defer e.endRequest()
 	endpoint := e.router.EndpointLabel(req.Method, req.URL.Path)
 	if req.URL.Path == "/healthz" || req.URL.Path == "/readyz" {
 		endpoint = req.URL.Path
@@ -274,11 +322,11 @@ func (e *Engine) Readiness(ctx context.Context) error {
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
-	client := &http.Client{Timeout: timeout}
 	group, ctx := errgroup.WithContext(ctx)
 	for name, upstream := range e.config.Upstreams {
 		name, baseURL := name, upstream.BaseURL
 		group.Go(func() error {
+			client := &http.Client{Timeout: timeout}
 			request, err := http.NewRequestWithContext(ctx, http.MethodHead, baseURL, nil)
 			if err != nil {
 				return fmt.Errorf("readiness request for upstream %q: %w", name, err)
@@ -391,8 +439,13 @@ func (e *Engine) handleEndpoint(w http.ResponseWriter, req *http.Request, endpoi
 		"path":      stringParams(pathParams(req.Context())),
 		"query":     query,
 		"headers":   headers,
+		"header":    headers,
 		"body":      decodedBody,
 		"requestID": ctx.Value(requestIDKey{}),
+	}
+	if clientAuthMissing(e.config, endpoint, input) {
+		writeAPIError(w, http.StatusUnauthorized, "CLIENT_AUTH_MISSING", "client authentication header is missing", requestIDFrom(req))
+		return
 	}
 	for _, keyTemplate := range endpoint.CacheInvalidate {
 		key, err := step.RenderTemplate(keyTemplate, input)
@@ -442,6 +495,31 @@ func (e *Engine) handleEndpoint(w http.ResponseWriter, req *http.Request, endpoi
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(response)
+}
+
+func clientAuthMissing(cfg *config.Config, endpoint config.Endpoint, input map[string]any) bool {
+	headers, ok := input["headers"].(map[string]any)
+	if !ok {
+		return true
+	}
+	for _, stepConfig := range endpoint.Pipeline {
+		if stepConfig.Type != "fetch" {
+			continue
+		}
+		upstream, ok := cfg.Upstreams[stepConfig.Upstream]
+		if !ok || upstream.Auth.Type != "client" {
+			continue
+		}
+		header := upstream.Auth.Header
+		if header == "" {
+			header = "Authorization"
+		}
+		value, ok := headers[http.CanonicalHeaderKey(header)]
+		if !ok || strings.TrimSpace(fmt.Sprint(value)) == "" {
+			return true
+		}
+	}
+	return false
 }
 
 func stringParams(params map[string]string) map[string]any {

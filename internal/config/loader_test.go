@@ -33,7 +33,7 @@ endpoints:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Server.Address != ":8080" || time.Duration(cfg.Upstreams["users"].Timeout) != 250*time.Millisecond {
+	if cfg.Server.Address != ":8080" || time.Duration(cfg.Upstreams["users"].Timeout) != 250*time.Millisecond || cfg.Upstreams["users"].ConnectionPool.MaxIdleConns != 100 {
 		t.Fatalf("defaults or duration not applied: %#v", cfg)
 	}
 }

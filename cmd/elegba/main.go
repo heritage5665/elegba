@@ -88,15 +88,20 @@ func run() error {
 			slog.Error("tracing shutdown failed", "error", err)
 		}
 	}()
-	appEngine, err := engine.New(cfg)
+	appServer, err := engine.NewServer(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to initialize engine: %w", err)
 	}
-	defer appEngine.Close()
+	defer appServer.Close()
+	if hotReloadEnabled() {
+		if err := appServer.Watch(context.Background(), *configFlag, hotReloadDebounce()); err != nil {
+			return fmt.Errorf("start configuration watcher: %w", err)
+		}
+	}
 
 	srv := &http.Server{
 		Addr:              cfg.Server.Address,
-		Handler:           appEngine,
+		Handler:           appServer,
 		ReadTimeout:       time.Duration(cfg.Server.ReadTimeout),
 		WriteTimeout:      time.Duration(cfg.Server.WriteTimeout),
 		IdleTimeout:       time.Duration(cfg.Server.IdleTimeout),
@@ -106,7 +111,7 @@ func run() error {
 	if cfg.Server.Admin.Enabled {
 		adminServer = &http.Server{
 			Addr:              cfg.Server.Admin.Address,
-			Handler:           adminserver.NewHandler(appEngine.MetricsHandler(), http.HandlerFunc(appEngine.HealthHandler), http.HandlerFunc(appEngine.ReadyHandler)),
+			Handler:           adminserver.NewHandler(appServer.MetricsHandler(), http.HandlerFunc(appServer.HealthHandler), http.HandlerFunc(appServer.ReadyHandler)),
 			ReadTimeout:       time.Duration(cfg.Server.ReadTimeout),
 			WriteTimeout:      time.Duration(cfg.Server.WriteTimeout),
 			IdleTimeout:       time.Duration(cfg.Server.IdleTimeout),
@@ -149,4 +154,25 @@ func run() error {
 	}
 	slog.Info("Elegba stopped")
 	return nil
+}
+
+func hotReloadEnabled() bool {
+	value := os.Getenv("ELEGBA_HOT_RELOAD")
+	if value == "" {
+		return true
+	}
+	enabled, err := strconv.ParseBool(value)
+	return err == nil && enabled
+}
+
+func hotReloadDebounce() time.Duration {
+	value := os.Getenv("ELEGBA_HOT_RELOAD_DEBOUNCE")
+	if value == "" {
+		return 500 * time.Millisecond
+	}
+	debounce, err := time.ParseDuration(value)
+	if err != nil || debounce <= 0 {
+		return 500 * time.Millisecond
+	}
+	return debounce
 }

@@ -5,6 +5,8 @@ package step
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -100,6 +102,24 @@ func templateFunctions() template.FuncMap {
 				total += item
 			}
 			return total, nil
+		},
+		"dict": func(values ...any) (map[string]any, error) {
+			if len(values)%2 != 0 {
+				return nil, fmt.Errorf("dict requires key-value pairs")
+			}
+			result := make(map[string]any, len(values)/2)
+			for i := 0; i < len(values); i += 2 {
+				key, ok := values[i].(string)
+				if !ok {
+					return nil, fmt.Errorf("dict keys must be strings")
+				}
+				result[key] = values[i+1]
+			}
+			return result, nil
+		},
+		"sha256": func(value string) string {
+			digest := sha256.Sum256([]byte(value))
+			return hex.EncodeToString(digest[:])
 		},
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -43,7 +44,12 @@ func NewFetchStep(stepConfig config.Step, upstream config.Upstream, cache cacheb
 	if upstream.Timeout <= 0 {
 		upstream.Timeout = config.Duration(config.DefaultTimeout)
 	}
-	return NewFetchStepWithTransport(stepConfig, upstream, httptransport.NewHTTPTransport(time.Duration(upstream.Timeout)), cache, defaultCacheTTL)
+	pool := upstream.ConnectionPool
+	return NewFetchStepWithTransport(stepConfig, upstream, httptransport.NewHTTPTransport(time.Duration(upstream.Timeout), httptransport.HTTPTransportOptions{
+		MaxIdleConns:        pool.MaxIdleConns,
+		MaxIdleConnsPerHost: pool.MaxIdleConnsPerHost,
+		IdleConnTimeout:     time.Duration(pool.IdleConnTimeout),
+	}), cache, defaultCacheTTL)
 }
 
 func NewFetchStepWithTransport(stepConfig config.Step, upstream config.Upstream, client httptransport.Transport, cache cachebackend.Cache, defaultCacheTTL time.Duration) (*FetchStep, error) {
@@ -124,7 +130,7 @@ func (f *FetchStep) execute(ctx context.Context, data map[string]any, skipCache 
 					return stale.Value, nil
 				}
 			} else {
-			return value, nil
+				return value, nil
 			}
 		}
 	}
@@ -159,7 +165,9 @@ func (f *FetchStep) execute(ctx context.Context, data map[string]any, skipCache 
 	if requestID, ok := data["requestID"].(string); ok && requestID != "" {
 		req.Header.Set("X-Request-ID", requestID)
 	}
-	applyAuth(req, f.upstream.Auth)
+	if err := applyAuth(req, f.upstream.Auth, data); err != nil {
+		return nil, err
+	}
 	response, err := f.client.Do(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("upstream %q request: %w", f.config.Upstream, err)
@@ -222,7 +230,9 @@ func (f *FetchStep) refreshStale(key string, data map[string]any) {
 
 var _ pipeline.Step = (*FetchStep)(nil)
 
-func applyAuth(req *http.Request, auth config.AuthConfig) {
+var ErrClientAuthMissing = errors.New("client authentication header is missing")
+
+func applyAuth(req *http.Request, auth config.AuthConfig, data map[string]any) error {
 	switch auth.Type {
 	case "bearer":
 		req.Header.Set("Authorization", "Bearer "+auth.Token)
@@ -234,7 +244,51 @@ func applyAuth(req *http.Request, auth config.AuthConfig) {
 			name = "X-API-Key"
 		}
 		req.Header.Set(name, auth.Key)
+	case "client":
+		incomingHeader := auth.Header
+		if incomingHeader == "" {
+			incomingHeader = "Authorization"
+		}
+		forwardHeader := auth.Forward
+		if forwardHeader == "" {
+			forwardHeader = incomingHeader
+		}
+		scheme := auth.Scheme
+		if scheme == "" {
+			scheme = "Bearer"
+		}
+		value, ok := requestHeader(data, incomingHeader)
+		if !ok || value == "" {
+			return fmt.Errorf("%w: %s", ErrClientAuthMissing, incomingHeader)
+		}
+		token := strings.TrimSpace(value)
+		if strings.HasPrefix(strings.ToLower(token), strings.ToLower(scheme)+" ") {
+			token = strings.TrimSpace(token[len(scheme):])
+		}
+		if scheme != "" {
+			token = scheme + " " + token
+		}
+		req.Header.Set(forwardHeader, token)
 	}
+	return nil
+}
+
+func requestHeader(data map[string]any, name string) (string, bool) {
+	headers, ok := data["headers"].(map[string]any)
+	if !ok {
+		return "", false
+	}
+	value, ok := headers[http.CanonicalHeaderKey(name)]
+	if !ok {
+		return "", false
+	}
+	if value == nil {
+		return "", false
+	}
+	if stringValue, ok := value.(string); ok {
+		return stringValue, true
+	}
+	return fmt.Sprint(value), true
 }
 
 func parseTemplate(name, source string) (*template.Template, error) {

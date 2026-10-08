@@ -73,16 +73,27 @@
       "additionalProperties": false,
       "required": ["baseURL"],
       "properties": {
+        "transport": { "type": "string", "enum": ["http"], "default": "http" },
         "baseURL": { "type": "string", "format": "uri", "pattern": "^https?://" },
         "timeout": { "$ref": "#/$defs/duration", "default": "2s" },
         "maxResponseBytes": { "type": "integer", "minimum": 1, "default": 10485760 },
         "maxConcurrent": { "type": "integer", "minimum": 1, "default": 100 },
+        "connectionPool": { "$ref": "#/$defs/connectionPool" },
         "retries": { "type": "integer", "minimum": 0, "default": 2 },
         "retry": { "$ref": "#/$defs/retry" },
         "breaker": { "$ref": "#/$defs/breaker" },
         "rateLimit": { "type": "string", "pattern": "^[1-9][0-9]*/(s|m|h)$" },
         "headers": { "type": "object", "additionalProperties": { "type": "string" } },
         "auth": { "$ref": "#/$defs/auth" }
+      }
+    },
+    "connectionPool": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxIdleConns": { "type": "integer", "minimum": 0, "default": 100 },
+        "maxIdleConnsPerHost": { "type": "integer", "minimum": 0, "default": 100 },
+        "idleConnTimeout": { "$ref": "#/$defs/duration", "default": "90s" }
       }
     },
     "retry": {
@@ -110,12 +121,14 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "type": { "type": "string", "enum": ["bearer", "basic", "apikey"] },
+        "type": { "type": "string", "enum": ["bearer", "basic", "apikey", "client"] },
         "token": { "type": "string" },
         "username": { "type": "string" },
         "password": { "type": "string" },
         "key": { "type": "string" },
-        "header": { "type": "string", "default": "X-API-Key" }
+        "header": { "type": "string", "default": "Authorization" },
+        "forward": { "type": "string", "default": "Authorization" },
+        "scheme": { "type": "string", "default": "Bearer" }
       }
     },
     "cache": {

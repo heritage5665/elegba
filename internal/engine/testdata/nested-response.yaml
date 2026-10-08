@@ -1,0 +1,38 @@
+version: "1"
+
+upstreams:
+  profile-service:
+    transport: http
+    baseURL: ${ELEGBA_TEST_NESTED_PROFILE_URL}
+    timeout: 2s
+  activity-service:
+    transport: http
+    baseURL: ${ELEGBA_TEST_NESTED_ACTIVITY_URL}
+    timeout: 2s
+
+endpoints:
+  - path: /profiles/{id}
+    method: GET
+    pipeline:
+      - id: profile
+        type: fetch
+        upstream: profile-service
+        path: /profiles/{{ .path.id }}
+        method: GET
+      - id: activity
+        type: fetch
+        upstream: activity-service
+        path: /activity/{{ .path.id }}
+        method: GET
+      - id: summary
+        type: transform
+        dependsOn: [profile, activity]
+        template: |
+          {{ dict
+              "id" .profile.profile.id
+              "name" .profile.profile.name
+              "roles" .profile.profile.roles
+              "activity_id" .activity.activity.id
+              "status" .activity.activity.status
+              "score" .activity.activity.score
+            | toJSON }}
