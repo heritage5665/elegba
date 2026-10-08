@@ -1,6 +1,6 @@
 # Elegba — Architecture
 
-**Version:** 1.0
+**Version:** 1.1
 **Applies to:** Elegba v1.x
 
 This document describes the internal architecture of Elegba: how a request flows
@@ -23,16 +23,17 @@ For configuration fields, see [config-reference.md](./config-reference.md).
 7. [DAG Executor](#7-dag-executor)
 8. [Concurrency Model](#8-concurrency-model)
 9. [Resilience Chain](#9-resilience-chain)
-10. [Caching Strategy](#10-caching-strategy)
-11. [Transformation Engine](#11-transformation-engine)
-12. [Configuration Lifecycle](#12-configuration-lifecycle)
-13. [Hot Reload](#13-hot-reload)
-14. [Observability Pipeline](#14-observability-pipeline)
-15. [Error Handling](#15-error-handling)
-16. [Graceful Shutdown](#16-graceful-shutdown)
-17. [Design Decisions & Trade-offs](#17-design-decisions--trade-offs)
-18. [Extension Points](#18-extension-points)
-19. [Diagrams](#19-diagrams)
+10. [Auth Flow](#10-auth-flow)
+11. [Caching Strategy](#11-caching-strategy)
+12. [Transformation Engine](#12-transformation-engine)
+13. [Configuration Lifecycle](#13-configuration-lifecycle)
+14. [Hot Reload](#14-hot-reload)
+15. [Observability Pipeline](#15-observability-pipeline)
+16. [Error Handling](#16-error-handling)
+17. [Graceful Shutdown](#17-graceful-shutdown)
+18. [Design Decisions & Trade-offs](#18-design-decisions--trade-offs)
+19. [Extension Points](#19-extension-points)
+20. [Diagrams](#20-diagrams)
 
 ---
 
@@ -56,6 +57,8 @@ Elegba is built on these non-negotiable principles:
    context.
 8. **Deterministic output.** The response shape does not depend on step
    completion order.
+9. **Security by default.** Client tokens are never logged, never cached
+   without a hash, and never forwarded to upstreams that shouldn't see them.
 
 ---
 
@@ -352,11 +355,11 @@ pipeline:
     type: transform
     dependsOn: [user, orders, recommendations]
     template: |
-      {
-        "user": {{ .user | toJSON }},
-        "orders": {{ .orders | toJSON }},
-        "recommendations": {{ .recommendations | toJSON }}
-      }
+      {{ dict
+          "user" .user
+          "orders" .orders
+          "recommendations" .recommendations
+        | toJSON }}
 ```
 
 ### Resulting DAG
@@ -654,7 +657,151 @@ CLOSED ─────────────────────▶ OPEN
 
 ---
 
-## 10. Caching Strategy
+## 10. Auth Flow
+
+Elegba supports four auth modes for upstreams, plus client-provided auth.
+Each is configured per upstream.
+
+### 10.1 Static Auth
+
+The token is provided in config, interpolated from env vars at load time.
+
+```yaml
+auth:
+  type: bearer
+  token: ${USER_SERVICE_TOKEN}
+```
+
+**Flow:**
+
+```
+Config load → token resolved from env → attached to every request
+```
+
+**Use case:** Service-to-service calls where Elegba has its own credentials.
+
+### 10.2 Client Auth
+
+The token is extracted from the incoming request and forwarded to the upstream.
+
+```yaml
+auth:
+  type: client
+  header: Authorization
+  forward: Authorization
+  scheme: Bearer
+```
+
+**Flow:**
+
+```
+Incoming request
+    │
+    ▼
+Extract .header.Authorization
+    │
+    ├── missing → 401 CLIENT_AUTH_MISSING
+    │
+    ▼
+Strip scheme (e.g., "Bearer ")
+    │
+    ▼
+Re-add configured scheme
+    │
+    ▼
+Set forward header on upstream request
+    │
+    ▼
+Upstream receives the client's token
+```
+
+**Use case:** BFFs acting on behalf of the calling user.
+
+**Security considerations:**
+
+- Tokens are never logged (redacted in structured logs).
+- Cache keys MUST include a token hash when `auth.type: client` is used.
+  Elegba enforces this at config load time.
+- TLS MUST be enforced between Elegba and the upstream.
+- Do not forward a token to an upstream that should not see it.
+
+### 10.3 Token Exchange
+
+For systems where the client's token is not what upstreams expect, use a
+token-exchange step.
+
+```yaml
+pipeline:
+  - id: token
+    type: fetch
+    upstream: auth-service
+    path: /exchange
+    method: POST
+    body: |
+      {"client_token": "{{ .header.Authorization | replacePrefix "Bearer " "" }}"}
+    cache:
+      backend: memory
+      key: "token:{{ .header.Authorization | sha256 }}"
+      ttl: 5m
+
+  - id: user
+    type: fetch
+    upstream: user-service
+    path: /users/{{ .path.userId }}
+    dependsOn: [token]
+    headers:
+      Authorization: "Bearer {{ .token.access_token }}"
+```
+
+**Flow:**
+
+```
+Incoming request (client token)
+    │
+    ▼
+Wave 1: token exchange step
+    ├── cache lookup by client token hash
+    │     HIT → use cached service token
+    │     MISS → call auth-service, cache result
+    │
+    ▼
+Wave 2: fetch steps use the service token
+```
+
+**Use case:** OAuth2 token exchange, On-Behalf-Of flows, multi-tenant auth.
+
+### 10.4 Auth Mode Comparison
+
+| Mode | Token source | Forwarded to upstream | Cache safety |
+|------|--------------|----------------------|--------------|
+| Static | Config (env var) | Same token for all requests | Cache key does not need token hash |
+| Client | Incoming request header | Client's token (possibly transformed) | Cache key MUST include token hash |
+| Exchange | Fetched from auth service | Service-specific token | Cache key MUST include client token hash |
+| OAuth2 | Fetched from token endpoint | Service's own OAuth2 token | Cache key does not need token hash |
+
+### 10.5 Missing Client Auth
+
+If `auth.type: client` is configured and the client's header is absent,
+Elegba returns:
+
+```json
+{
+  "error": {
+    "code": "CLIENT_AUTH_MISSING",
+    "message": "required header Authorization not present in request",
+    "requestId": "01HXYZ..."
+  }
+}
+```
+
+Status: `401 Unauthorized`.
+
+Metric: `elegba_client_auth_missing_total{upstream="user-service"}` is
+incremented.
+
+---
+
+## 11. Caching Strategy
 
 Caching is applied **per step**, not per endpoint. This gives fine-grained
 control.
@@ -692,8 +839,22 @@ step outputs.
 ```yaml
 cache:
   backend: memory
-  key: "user:{{ .query.userId }}:v{{ .user.version }}"
+  key: "user:{{ .path.userId }}:{{ .header.Authorization | sha256 }}"
   ttl: 60s
+```
+
+### Cache safety rule
+
+When `auth.type: client` is used on an upstream, the cache key MUST include a
+hash of the client token. Otherwise, two different users requesting the same
+resource could see each other's cached data — a critical security bug.
+
+Elegba **enforces this at config load time**. If the rule is violated, startup
+fails with a clear error:
+
+```
+config error: endpoint /users/{userId}/summary step user:
+  cache key must include a hash of the client token when auth.type is "client"
 ```
 
 ### Stale-while-revalidate
@@ -733,7 +894,7 @@ Two mechanisms:
 
 ---
 
-## 11. Transformation Engine
+## 12. Transformation Engine
 
 Transformations use Go's `text/template` with custom functions.
 
@@ -778,6 +939,23 @@ return buf.Bytes(), nil
 | `.requestID` | Request ID |
 | `.<stepID>` | Output of a previous step |
 
+### The `dict` + `toJSON` pattern
+
+For safe JSON output, use `dict` to build the object and `toJSON` to marshal
+it:
+
+```gotemplate
+{{ dict
+    "user_id"            .user.id
+    "user_status"        .user.user_status
+    "account_balance"    .ledger.ledger_balance
+  | toJSON }}
+```
+
+This avoids all manual quoting and escaping bugs. A string containing a `"`
+would break a hand-written template like `"{{ .user_status }}"`, but `toJSON`
+handles it correctly.
+
 ### Why Go templates?
 
 | Option | Pros | Cons | Verdict |
@@ -795,7 +973,7 @@ return buf.Bytes(), nil
 
 ---
 
-## 12. Configuration Lifecycle
+## 13. Configuration Lifecycle
 
 ```
 ┌─────────────┐
@@ -842,7 +1020,7 @@ Validation happens in two passes:
 
 1. **Structural**: parse into structs, check types.
 2. **Semantic**: check references (upstreams exist, caches exist, DAG is
-   acyclic, templates parse).
+   acyclic, templates parse, cache safety rule holds for client auth).
 
 Failures are collected and reported together, not one at a time.
 
@@ -853,7 +1031,7 @@ worse than a stopped one: it silently produces wrong responses.
 
 ---
 
-## 13. Hot Reload
+## 14. Hot Reload
 
 Hot reload swaps the engine atomically without dropping requests.
 
@@ -935,7 +1113,7 @@ engine's `Close()` waits for its `WaitGroup` to drain, up to
 
 ---
 
-## 14. Observability Pipeline
+## 15. Observability Pipeline
 
 Every request emits logs, metrics, and traces.
 
@@ -965,6 +1143,8 @@ Logs are emitted at:
 - Request completion (info).
 - Errors (error).
 
+Auth headers are redacted in all logs.
+
 ### Metrics
 
 Prometheus metrics are registered at startup and updated per request.
@@ -979,6 +1159,7 @@ Prometheus metrics are registered at startup and updated per request.
 | `elegba_cache_misses_total` | Counter | Cache miss |
 | `elegba_circuit_breaker_state` | Gauge | Breaker state changes |
 | `elegba_inflight_requests` | Gauge | Request start/end |
+| `elegba_client_auth_missing_total` | Counter | Client auth header missing |
 
 ### Traces
 
@@ -1005,7 +1186,7 @@ Every request gets a ULID at the middleware layer. It's:
 
 ---
 
-## 15. Error Handling
+## 16. Error Handling
 
 Errors are categorized and handled consistently.
 
@@ -1018,6 +1199,7 @@ Errors are categorized and handled consistently.
 | Method | Path matches, method doesn't | 405 | Return structured error |
 | Validation | Request body too large | 413 | Return structured error |
 | Rate limit | Endpoint concurrency exceeded | 429 | Return structured error |
+| Client auth | Missing client token | 401 | Return structured error |
 | Upstream timeout | `context.DeadlineExceeded` | 504 | Retry, then return |
 | Upstream error | 5xx from upstream | 502 | Retry, then return |
 | Breaker open | Circuit open | 503 | Fail fast |
@@ -1066,7 +1248,7 @@ defer func() {
 
 ---
 
-## 16. Graceful Shutdown
+## 17. Graceful Shutdown
 
 On SIGTERM or SIGINT:
 
@@ -1124,7 +1306,7 @@ A second SIGTERM/SIGINT forces immediate exit.
 
 ---
 
-## 17. Design Decisions & Trade-offs
+## 18. Design Decisions & Trade-offs
 
 ### Why Go?
 
@@ -1147,6 +1329,13 @@ A second SIGTERM/SIGINT forces immediate exit.
 - Familiar to Go developers.
 - Trade-off: less concise than JSONata for complex transformations.
 
+### Why `dict` + `toJSON` instead of hand-written JSON?
+
+- Hand-written JSON templates are fragile: a string containing a `"` breaks
+  the output.
+- `dict | toJSON` handles all escaping correctly.
+- Slightly more verbose, vastly more correct.
+
 ### Why per-step caching instead of per-endpoint?
 
 - Fine-grained control: cache the expensive call, not the cheap one.
@@ -1166,6 +1355,14 @@ A second SIGTERM/SIGINT forces immediate exit.
 - Operators can opt into strict mode with `failFast: true`.
 - Trade-off: clients must handle `_errors` fields.
 
+### Why client-provided auth as a first-class mode?
+
+- BFFs act on behalf of the calling user; forwarding the token is the natural
+  pattern.
+- Making it explicit (rather than template-based header forwarding) avoids
+  conflicts with static auth and enables load-time validation of cache safety.
+- Trade-off: adds one more auth type to learn.
+
 ### Why atomic pointer for hot reload?
 
 - Zero-cost on the hot path.
@@ -1180,7 +1377,7 @@ A second SIGTERM/SIGINT forces immediate exit.
 
 ---
 
-## 18. Extension Points
+## 19. Extension Points
 
 Elegba is designed to be extended. The following are the primary extension
 points.
@@ -1204,6 +1401,13 @@ points.
 1. Create `internal/cache/mybackend.go`.
 2. Implement the `Cache` interface.
 3. Register with `cache.Register("mybackend", factory)`.
+4. Add config validation rules.
+
+### Adding a new auth type
+
+1. Create `internal/transport/auth/mytype.go`.
+2. Implement the `AuthStrategy` interface.
+3. Register with `auth.Register("mytype", factory)`.
 4. Add config validation rules.
 
 ### Adding a new template function
@@ -1231,9 +1435,9 @@ http.ListenAndServe(":8080", eng)
 
 ---
 
-## 19. Diagrams
+## 20. Diagrams
 
-### 19.1 Full request flow
+### 20.1 Full request flow
 
 ```
 Client
@@ -1260,7 +1464,7 @@ HTTP Server ──▶ Middleware ──▶ Router ──▶ Executor ──▶ R
   └──▶ X-Request-ID, response
 ```
 
-### 19.2 DAG execution
+### 20.2 DAG execution
 
 ```
 Wave 1                Wave 2                Wave 3
@@ -1273,7 +1477,7 @@ Wave 1                Wave 2                Wave 3
                 concurrent execution
 ```
 
-### 19.3 Resilience chain
+### 20.3 Resilience chain
 
 ```
 Request
@@ -1309,7 +1513,27 @@ Request
 └──────────────┘
 ```
 
-### 19.4 Hot reload
+### 20.4 Auth flow (client mode)
+
+```
+Client
+  │  Authorization: Bearer <token>
+  ▼
+Elegba
+  │
+  ├── Extract Authorization header
+  ├── Strip "Bearer " prefix
+  ├── Re-add "Bearer " prefix
+  │
+  ▼
+Upstream
+  │  Authorization: Bearer <token>
+  │
+  ▼
+Response
+```
+
+### 20.5 Hot reload
 
 ```
 ┌────────────┐        ┌────────────┐        ┌────────────┐

@@ -4,7 +4,7 @@
 >
 > A config-driven API aggregator and Backend-for-Frontend (BFF) written in Go.
 
-**Version:** 1.0
+**Version:** 1.1
 **Status:** Draft
 **Language:** Go 1.22+
 **License:** MIT
@@ -227,14 +227,14 @@ server:
   idleTimeout: 120s
   readHeaderTimeout: 5s
   shutdownTimeout: 30s
-  maxBodyBytes: 1048576          # 1MB
+  maxBodyBytes: 1048576
   cors:
     allowedOrigins: ["https://app.example.com"]
     allowedMethods: ["GET", "POST"]
     allowedHeaders: ["Authorization", "Content-Type"]
     allowCredentials: true
   admin:
-    address: ":9090"             # pprof, metrics
+    address: ":9090"
     enabled: false
 
 upstreams:
@@ -242,7 +242,7 @@ upstreams:
     transport: http
     baseURL: https://api.example.com
     timeout: 2s
-    maxResponseBytes: 10485760   # 10MB
+    maxResponseBytes: 10485760
     maxConcurrent: 100
     retries: 2
     retry:
@@ -250,6 +250,7 @@ upstreams:
       maxInterval: 2s
       multiplier: 2.0
       maxElapsedTime: 10s
+      jitter: true
     breaker:
       maxRequests: 5
       interval: 60s
@@ -257,8 +258,10 @@ upstreams:
       failureThreshold: 5
     rateLimit: 100/s
     auth:
-      type: bearer               # bearer | basic | apikey | oauth2
-      token: ${USER_TOKEN}
+      type: client
+      header: Authorization
+      forward: Authorization
+      scheme: Bearer
     tls:
       caFile: /etc/elegba/ca.pem
       certFile: /etc/elegba/cert.pem
@@ -294,7 +297,7 @@ endpoints:
         cache:
           backend: memory
           ttl: 60s
-          key: "user:{{ .query.userId }}"
+          key: "user:{{ .query.userId }}:{{ .header.Authorization | sha256 }}"
           staleWhileRevalidate: true
       - id: orders
         type: fetch
@@ -305,11 +308,10 @@ endpoints:
         type: transform
         dependsOn: [user, orders]
         template: |
-          {
-            "user": {{ .user | toJSON }},
-            "orderCount": {{ len .orders }},
-            "total": {{ add .orders.0.amount .orders.1.amount }}
-          }
+          {{ dict
+              "user" .user
+              "orderCount" (len .orders)
+            | toJSON }}
 ```
 
 ### 6.2 Validation Rules
@@ -323,6 +325,8 @@ endpoints:
 - Templates must parse at load time.
 - All `${VAR}` references must resolve at load time unless a default is given.
 - Unknown fields are rejected (`yaml.KnownFields(true)`).
+- If `auth.type: client` and the upstream is used by a cached `fetch` step,
+  the cache key must contain a token hash (see §14.9).
 
 ### 6.3 JSON Schema
 
@@ -454,15 +458,18 @@ JSON object. Go's `text/template` is used with custom functions.
 | `upper`, `lower`, `trim` | String manipulation. |
 | `now` | Current time (RFC3339). |
 | `uuid` | Generate a UUIDv7. |
+| `dict` | Build a map from key-value pairs. |
+| `sha256` | Hex-encoded SHA-256 of a string. |
+| `replacePrefix` | Remove a prefix from a string. |
+| `redact` | Redact a value for safe logging. |
 
 ### 9.2 Example
 
 ```gotemplate
-{
-  "user": {{ .user | toJSON }},
-  "orderCount": {{ len .orders }},
-  "total": {{ add .orders.0.amount .orders.1.amount }}
-}
+{{ dict
+    "user" .user
+    "orderCount" (len .orders)
+  | toJSON }}
 ```
 
 ### 9.3 Performance
@@ -540,7 +547,7 @@ Every upstream call is wrapped in a resilience chain:
 - Retries with exponential backoff (`cenkalti/backoff/v4`) + jitter.
 - Circuit breaker (`sony/gobreaker`).
 - Rate limiting (`golang.org/x/time/rate`).
-- Auth: Bearer, Basic, API Key, OAuth2 client credentials.
+- Auth: Bearer, Basic, API Key, OAuth2 client credentials, Client (forward).
 - Connection pooling: `MaxIdleConns`, `MaxIdleConnsPerHost`, `IdleConnTimeout`.
 
 ### 11.4 Retry Policy
@@ -582,6 +589,7 @@ Every upstream call is wrapped in a resilience chain:
 | `elegba_cache_misses_total` | Counter | `backend` |
 | `elegba_circuit_breaker_state` | Gauge | `upstream` (0=closed, 1=half-open, 2=open) |
 | `elegba_inflight_requests` | Gauge | `endpoint` |
+| `elegba_client_auth_missing_total` | Counter | `upstream` |
 
 ### 12.3 Tracing (OpenTelemetry)
 
@@ -684,6 +692,21 @@ On SIGTERM/SIGINT:
 
 - `govulncheck` in CI.
 
+### 14.9 Client-Provided Auth
+
+When an upstream uses `auth.type: client`:
+
+- The client's token is extracted from the incoming request and forwarded to
+  the upstream.
+- Tokens MUST NOT appear in logs. Redact `Authorization` and any custom auth
+  headers.
+- Cache keys MUST include a hash of the token to prevent cross-user data
+  leakage. Elegba enforces this at config load time.
+- TLS MUST be enforced between Elegba and the upstream.
+- Per-upstream auth config MUST be deliberate: do not forward a token to an
+  upstream that should not see it.
+- If the client header is missing, return `401 CLIENT_AUTH_MISSING`.
+
 ---
 
 ## 15. Project Layout
@@ -735,17 +758,21 @@ elegba/
 │   └── elegba/                    # public embedding API
 │       └── elegba.go
 ├── examples/
-│   ├── elegba.yaml
-│   ├── dashboard.yaml
-│   └── mobile-bff.yaml
+│   ├── elegba.yaml                # minimal config
+│   ├── user-summary.yaml          # §16 worked example
+│   ├── dashboard.yaml             # BFF dashboard pattern
+│   ├── mobile-bff.yaml            # mobile BFF pattern
+│   └── mock/
+│       └── main.go                # mock upstreams for testing
 ├── docs/
 │   ├── benchmarks.md
 │   ├── config-reference.md
-│   └── architecture.md
+│   ├── architecture.md
+│   └── roadmap.md
 ├── schema/
 │   └── elegba.schema.json
 ├── testdata/
-│   └── ...                        # golden files
+│   └── ...
 ├── DESIGN.md
 ├── README.md
 ├── CONTRIBUTING.md
@@ -753,6 +780,7 @@ elegba/
 ├── LICENSE
 ├── Makefile
 ├── Dockerfile
+├── docker-compose.yml
 ├── .golangci.yml
 ├── .github/
 │   └── workflows/
@@ -763,7 +791,341 @@ elegba/
 
 ---
 
-## 16. Performance Requirements
+## 16. Worked Example — Multi-Upstream Aggregation
+
+This section walks through a complete, concrete example that exercises the
+core features of Elegba: parallel fan-out, client-provided auth, field
+renaming, partial failure handling, safe caching, and observability.
+
+It is the canonical "hello world" for Elegba and should be used as the
+reference example in `examples/` and in the README quick start.
+
+### 16.1 Scenario
+
+**Endpoint:** `GET /users/{userId}/summary`
+
+**Goal:** Return a single JSON response that combines data from three
+upstream services:
+
+```json
+{
+  "user_id": 42,
+  "user_status": "ACTIVE",
+  "user_onboarded_on": "2024-03-15T10:22:00Z",
+  "account_balance": 1580.42,
+  "account_has_pnd": false,
+  "account_has_lien": true
+}
+```
+
+**Upstreams:**
+
+| Upstream | Endpoint | Returns |
+|----------|----------|---------|
+| `user-service` | `GET /users/{id}` | `{ "id", "user_status", "date_create" }` |
+| `ledger-service` | `GET /ledger/accounts/{id}` | `{ "account_number", "ledger_balance" }` |
+| `account-service` | `GET /accounts/{id}/flags` | `{ "has_pnd", "has_lien" }` |
+
+**Authentication:** The client sends `Authorization: Bearer <token>`. Elegba
+forwards the token to all three upstreams.
+
+**Resilience:** Each upstream has its own timeout, retries, breaker, and rate
+limit. Partial failures are allowed and surfaced via fallbacks or an `_errors`
+map.
+
+**Caching:** User data cached for 60s, keyed by user ID and a hash of the
+client token so users never see each other's cached data.
+
+### 16.2 Field Mapping
+
+| Output field | Source | Source field |
+|--------------|--------|--------------|
+| `user_id` | user-service | `id` |
+| `user_status` | user-service | `user_status` |
+| `user_onboarded_on` | user-service | `date_create` |
+| `account_balance` | ledger-service | `ledger_balance` |
+| `account_has_pnd` | account-service | `has_pnd` |
+| `account_has_lien` | account-service | `has_lien` |
+
+### 16.3 Configuration
+
+```yaml
+version: "1"
+
+server:
+  address: ":8080"
+  readTimeout: 5s
+  writeTimeout: 15s
+  idleTimeout: 120s
+  readHeaderTimeout: 5s
+  shutdownTimeout: 30s
+  maxBodyBytes: 1048576
+  admin:
+    address: ":9090"
+    enabled: true
+
+upstreams:
+  user-service:
+    transport: http
+    baseURL: ${USER_SERVICE_URL}
+    timeout: 2s
+    maxConcurrent: 100
+    retries: 2
+    retry:
+      initialInterval: 100ms
+      maxInterval: 1s
+      multiplier: 2.0
+      maxElapsedTime: 5s
+      jitter: true
+    breaker:
+      maxRequests: 5
+      interval: 60s
+      timeout: 30s
+      failureThreshold: 5
+    rateLimit: 200/s
+    auth:
+      type: client
+      header: Authorization
+      forward: Authorization
+      scheme: Bearer
+
+  ledger-service:
+    transport: http
+    baseURL: ${LEDGER_SERVICE_URL}
+    timeout: 3s
+    maxConcurrent: 100
+    retries: 2
+    breaker:
+      failureThreshold: 5
+    rateLimit: 200/s
+    auth:
+      type: client
+      header: Authorization
+      forward: Authorization
+      scheme: Bearer
+
+  account-service:
+    transport: http
+    baseURL: ${ACCOUNT_SERVICE_URL}
+    timeout: 2s
+    maxConcurrent: 100
+    retries: 3
+    breaker:
+      failureThreshold: 3
+    rateLimit: 200/s
+    auth:
+      type: client
+      header: Authorization
+      forward: Authorization
+      scheme: Bearer
+
+caches:
+  memory:
+    type: in-memory
+    maxSize: 10000
+    defaultTTL: 60s
+
+endpoints:
+  - path: /users/{userId}/summary
+    method: GET
+    timeout: 8s
+    maxConcurrent: 200
+    failFast: false
+    pipeline:
+      - id: user
+        type: fetch
+        upstream: user-service
+        path: /users/{{ .path.userId }}
+        method: GET
+        cache:
+          backend: memory
+          key: "user:{{ .path.userId }}:{{ .header.Authorization | sha256 }}"
+          ttl: 60s
+          staleWhileRevalidate: true
+
+      - id: ledger
+        type: fetch
+        upstream: ledger-service
+        path: /ledger/accounts/{{ .path.userId }}
+        method: GET
+
+      - id: account
+        type: fetch
+        upstream: account-service
+        path: /accounts/{{ .path.userId }}/flags
+        method: GET
+        onError: fallback
+        fallback:
+          static: '{"has_pnd": false, "has_lien": false}'
+
+      - id: summary
+        type: transform
+        dependsOn: [user, ledger, account]
+        template: |
+          {{ dict
+              "user_id"            .user.id
+              "user_status"        .user.user_status
+              "user_onboarded_on"  .user.date_create
+              "account_balance"    .ledger.ledger_balance
+              "account_has_pnd"    .account.has_pnd
+              "account_has_lien"   .account.has_lien
+            | toJSON }}
+```
+
+### 16.4 Execution Trace
+
+For `GET /users/42/summary` with `Authorization: Bearer eyJ...`:
+
+```
+t=0ms   Middleware
+        ├── generate request ID
+        ├── attach to context
+        ├── start metrics timer
+        └── start trace span
+
+t=1ms   Router
+        └── match /users/{userId}/summary, extract userId=42
+
+t=1ms   Executor builds DAG
+        Wave 1: user, ledger, account (no dependencies)
+        Wave 2: summary (depends on all three)
+
+t=2ms   Wave 1 (concurrent)
+        ├── fetch user    → cache miss → GET user-service
+        ├── fetch ledger  → GET ledger-service
+        └── fetch account → GET account-service
+              (all three carry the client's Authorization header)
+
+t=45ms  Wave 1 complete, results stored
+
+t=46ms  Wave 2
+        └── transform summary → dict + toJSON
+
+t=47ms  Response
+        ├── 200 OK
+        ├── Content-Type: application/json
+        ├── X-Request-ID: 01HXYZ...
+        └── logs, metrics, trace emitted
+```
+
+### 16.5 Partial Failure Behavior
+
+If `account-service` is unavailable, the fallback returns
+`{"has_pnd": false, "has_lien": false}`, and the response still contains all
+six fields. The client gets usable data instead of a 500.
+
+If the fallback is removed and `failFast: false`, the response includes an
+`_errors` map:
+
+```json
+{
+  "user_id": 42,
+  "user_status": "ACTIVE",
+  "user_onboarded_on": "2024-03-15T10:22:00Z",
+  "account_balance": 1580.42,
+  "account_has_pnd": null,
+  "account_has_lien": null,
+  "_errors": {
+    "account": "upstream account-service unavailable: circuit breaker open"
+  }
+}
+```
+
+Both behaviors are valid; the choice depends on whether the client prefers
+silence or transparency.
+
+### 16.6 Cache Safety
+
+The cache key is:
+
+```
+user:{userId}:{sha256(Authorization)}
+```
+
+Including the token hash ensures that two different users requesting the same
+userId never share a cache entry. Omitting it would leak data across users —
+a critical correctness and security bug. Elegba enforces this at config load
+time.
+
+### 16.7 Client-Provided Auth
+
+All three upstreams declare:
+
+```yaml
+auth:
+  type: client
+  header: Authorization
+  forward: Authorization
+  scheme: Bearer
+```
+
+This tells Elegba to extract the client's `Authorization` header, strip any
+existing scheme, re-add `Bearer`, and send it to the upstream. If the client
+header is missing, Elegba returns `401 CLIENT_AUTH_MISSING`.
+
+### 16.8 Observability Signals
+
+| Signal | What to observe |
+|--------|-----------------|
+| `elegba_requests_total{endpoint="/users/{userId}/summary",status="200"}` | Request volume |
+| `elegba_request_duration_seconds{endpoint="/users/{userId}/summary"}` | Latency distribution |
+| `elegba_step_duration_seconds{step="user"}` | Per-step latency |
+| `elegba_cache_hits_total{backend="memory"}` | Cache effectiveness |
+| `elegba_upstream_errors_total{upstream="account-service"}` | Upstream health |
+| `elegba_circuit_breaker_state{upstream="account-service"}` | Breaker state |
+| Logs with `request_id`, `endpoint`, `step_id`, `duration_ms` | Debugging |
+| Trace spans `request → step → upstream` | Distributed tracing |
+
+### 16.9 What This Example Demonstrates
+
+- **Parallel fan-out** to three upstreams.
+- **Client-provided auth** forwarded per upstream.
+- **Field renaming and reshaping** via `dict` + `toJSON`.
+- **Partial failure handling** via `failFast: false` and `onError: fallback`.
+- **Safe caching** keyed by user and token hash.
+- **Per-upstream resilience** with independent timeouts, retries, breakers.
+- **Zero handler code** — the entire feature is one YAML file.
+
+### 16.10 Required Template Functions
+
+This example relies on two template functions that MUST be included in
+`internal/transform/funcs.go`:
+
+| Function | Purpose | Signature |
+|----------|---------|-----------|
+| `dict` | Build a map from key-value pairs. | `dict(k1, v1, k2, v2, ...) map[string]any` |
+| `sha256` | Hex-encoded SHA-256 of a string. | `sha256(s string) string` |
+
+Both are trivial to implement and are used throughout the docs and examples.
+
+### 16.11 Client Auth — Config Reference Addition
+
+The `auth` object under `upstreams.*` gains a new type:
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `type` | string | yes | — | Now includes `"client"`. |
+| `header` | string | no | `"Authorization"` | Incoming header to read the token from. |
+| `forward` | string | no | same as `header` | Outgoing header to send. |
+| `scheme` | string | no | `"Bearer"` | Scheme prefix to apply. Set to `""` to forward verbatim. |
+
+**Behavior:**
+
+1. Extract `.header.<header>` from the incoming request.
+2. Strip the existing scheme prefix if present.
+3. Re-add the configured `scheme` prefix.
+4. Set the `forward` header on the upstream request.
+5. If the client's header is missing → return `401 CLIENT_AUTH_MISSING`.
+
+**Security:**
+
+- Tokens are never logged; they are redacted in structured logs.
+- Cache keys MUST include a token hash when `auth.type: client` is used.
+- TLS MUST be enforced between Elegba and upstreams.
+
+---
+
+## 17. Performance Requirements
 
 - **Zero-allocation hot paths** where feasible. Use `sync.Pool` for
   `bytes.Buffer`, `http.Request` bodies, and template execution contexts.
@@ -787,7 +1149,7 @@ elegba/
 
 ---
 
-## 17. Testing Strategy
+## 18. Testing Strategy
 
 - **Coverage**: ≥ 85% on `internal/` packages. Enforce in CI.
 - **Table-driven tests** for all pure logic (DAG, config, transform).
@@ -802,7 +1164,7 @@ elegba/
 
 ---
 
-## 18. Build & Deployment
+## 19. Build & Deployment
 
 - **Makefile** targets: `build`, `test`, `lint`, `bench`, `cover`, `docker`,
   `run`, `clean`, `tidy`, `generate`.
@@ -820,7 +1182,7 @@ elegba/
 
 ---
 
-## 19. Development Roadmap
+## 20. Development Roadmap
 
 ### MVP
 
@@ -848,7 +1210,7 @@ elegba/
 
 ---
 
-## 20. Naming Conventions
+## 21. Naming Conventions
 
 | Place              | Value                        |
 |--------------------|------------------------------|
@@ -863,7 +1225,7 @@ elegba/
 
 ---
 
-## 21. Definition of Done
+## 22. Definition of Done
 
 A feature is done when:
 
@@ -877,10 +1239,11 @@ A feature is done when:
 - [ ] Benchmarks exist for hot paths.
 - [ ] Documentation is updated (README, config reference, architecture).
 - [ ] A working example config demonstrates the feature.
+- [ ] The worked example from §16 passes end to end via `docker-compose`.
 
 ---
 
-## 22. References
+## 23. References
 
 - Go concurrency: `goroutines`, `channels`, `context`, `errgroup`.
 - Template engine: `text/template`.

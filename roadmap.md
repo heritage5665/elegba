@@ -1,6 +1,6 @@
 # Elegba — Roadmap
 
-**Version:** 1.0
+**Version:** 1.1
 **Applies to:** Elegba v1.x → v2.x
 **Status:** Living document
 
@@ -20,16 +20,17 @@ community feedback, security issues, or upstream dependencies.
 3. [Versioning Policy](#3-versioning-policy)
 4. [Milestone 0 — Foundation](#4-milestone-0--foundation)
 5. [Milestone 1 — MVP](#5-milestone-1--mvp)
-6. [Milestone 2 — Resilience](#6-milestone-2--resilience)
-7. [Milestone 3 — Observability](#7-milestone-3--observability)
-8. [Milestone 4 — Caching](#8-milestone-4--caching)
-9. [Milestone 5 — Hot Reload](#9-milestone-5--hot-reload)
-10. [Milestone 6 — v1.0 Release](#10-milestone-6--v10-release)
-11. [Milestone 7 — v1.x Hardening](#11-milestone-7--v1x-hardening)
-12. [Milestone 8 — v2.0 Planning](#12-milestone-8--v20-planning)
-13. [Beyond v2.0](#13-beyond-v20)
-14. [Explicitly Out of Scope](#14-explicitly-out-of-scope)
-15. [How to Contribute](#15-how-to-contribute)
+6. [Milestone 1.5 — Client Auth & Worked Example](#6-milestone-15--client-auth--worked-example)
+7. [Milestone 2 — Resilience](#7-milestone-2--resilience)
+8. [Milestone 3 — Observability](#8-milestone-3--observability)
+9. [Milestone 4 — Caching](#9-milestone-4--caching)
+10. [Milestone 5 — Hot Reload](#10-milestone-5--hot-reload)
+11. [Milestone 6 — v1.0 Release](#11-milestone-6--v10-release)
+12. [Milestone 7 — v1.x Hardening](#12-milestone-7--v1x-hardening)
+13. [Milestone 8 — v2.0 Planning](#13-milestone-8--v20-planning)
+14. [Beyond v2.0](#14-beyond-v20)
+15. [Explicitly Out of Scope](#15-explicitly-out-of-scope)
+16. [How to Contribute](#16-how-to-contribute)
 
 ---
 
@@ -134,73 +135,72 @@ concurrently and transform the response.
 
 **Target:** v0.1.0 (pre-release)
 
-**Status:** Implementation complete. Race-detector and golangci-lint checks are
-pending an environment with CGO and golangci-lint installed.
-
 ### Deliverables
 
 #### Config
 
-- [x] Config structs (`internal/config/config.go`).
-- [x] YAML loader with env interpolation (`${VAR}`, `${VAR:-default}`).
-- [x] Validator with clear error messages.
-- [x] Defaults (`internal/config/defaults.go`).
-- [x] Strict parsing (unknown keys rejected).
+- [ ] Config structs (`internal/config/config.go`).
+- [ ] YAML loader with env interpolation (`${VAR}`, `${VAR:-default}`).
+- [ ] Validator with clear error messages.
+- [ ] Defaults (`internal/config/defaults.go`).
+- [ ] Strict parsing (unknown keys rejected).
 
 #### Engine
 
-- [x] `Engine` type with `http.Handler` interface.
-- [x] `Router` matching `(method, path)` to endpoints.
-- [x] Path parameter extraction (`/users/{id}`).
-- [x] Query/header/body injection into context.
+- [ ] `Engine` type with `http.Handler` interface.
+- [ ] `Router` matching `(method, path)` to endpoints.
+- [ ] Path parameter extraction (`/users/{id}`).
+- [ ] Query/header/body injection into context.
 
 #### Pipeline
 
-- [x] `Step` interface.
-- [x] `StepRegistry` with factory map.
-- [x] DAG builder + cycle detection.
-- [x] Topological sort (Kahn's algorithm).
-- [x] Executor with `errgroup`, waves, `failFast` support.
-- [x] Result store with `sync.RWMutex`.
+- [ ] `Step` interface.
+- [ ] `StepRegistry` with factory map.
+- [ ] DAG builder + cycle detection.
+- [ ] Topological sort (Kahn's algorithm).
+- [ ] Executor with `errgroup`, waves, `failFast` support.
+- [ ] Result store with `sync.RWMutex`.
 
 #### Steps
 
-- [x] `fetch` step with HTTP transport.
-- [x] `transform` step with Go templates.
-- [x] Built-in template functions: `toJSON`, `fromJSON`, `len`, `index`,
+- [ ] `fetch` step with HTTP transport.
+- [ ] `transform` step with Go templates.
+- [ ] Built-in template functions: `toJSON`, `fromJSON`, `len`, `index`,
       `default`, `add`, `sum`.
+- [ ] (Functions `dict`, `sha256`, `replacePrefix`, `redact` land in
+      Milestone 1.5.)
 
 #### Transport
 
-- [x] `Transport` interface.
-- [x] HTTP transport with `net/http`.
-- [x] Basic auth (bearer, basic, apikey).
-- [x] Connection pooling.
+- [ ] `Transport` interface.
+- [ ] HTTP transport with `net/http`.
+- [ ] Basic auth (bearer, basic, apikey).
+- [ ] Connection pooling.
 
 #### Observability
 
-- [x] `log/slog` structured JSON logging.
-- [x] Request ID (ULID) middleware.
-- [x] `/healthz` and `/readyz` endpoints.
+- [ ] `log/slog` structured JSON logging.
+- [ ] Request ID (ULID) middleware.
+- [ ] `/healthz` and `/readyz` endpoints.
 
 #### Cache
 
-- [x] `Cache` interface.
-- [x] In-memory backend (`ristretto`).
-- [x] `cache` step (get/set).
+- [ ] `Cache` interface.
+- [ ] In-memory backend (`ristretto`).
+- [ ] `cache` step (get/set).
 
 #### CLI
 
-- [x] `--config` flag.
-- [x] `--log-level` flag.
-- [x] Graceful shutdown on SIGTERM/SIGINT.
+- [ ] `--config` flag.
+- [ ] `--log-level` flag.
+- [ ] Graceful shutdown on SIGTERM/SIGINT.
 
 #### Tests
 
-- [x] Unit tests for config, DAG, executor, steps.
-- [x] Integration tests with `httptest.Server`.
-- [x] Golden file tests for transformations.
-- [x] Coverage ≥ 80% on `internal/` (80.6%).
+- [ ] Unit tests for config, DAG, executor, steps.
+- [ ] Integration tests with `httptest.Server`.
+- [ ] Golden file tests for transformations.
+- [ ] Coverage ≥ 80% on `internal/`.
 
 ### Acceptance Criteria
 
@@ -218,91 +218,154 @@ pending an environment with CGO and golangci-lint installed.
 - Hot reload.
 - Partial failure handling (`failFast: false` is a no-op).
 
-### Example Config (MVP)
+---
 
-```yaml
-version: "1"
-upstreams:
-  user:
-    baseURL: https://api.example.com
-    auth:
-      type: bearer
-      token: ${USER_TOKEN}
-endpoints:
-  - path: /dashboard
-    method: GET
-    pipeline:
-      - id: user
-        type: fetch
-        upstream: user
-        path: /users/{{ .query.id }}
-      - id: combined
-        type: transform
-        dependsOn: [user]
-        template: |
-          {"user": {{ .user | toJSON }}}
-```
+## 6. Milestone 1.5 — Client Auth & Worked Example
+
+**Goal:** Make the canonical multi-upstream example from `DESIGN.md` §16
+work end to end. This closes the gap between "MVP that fetches" and "MVP you
+can actually use behind a real BFF."
+
+**Target:** v0.1.5 (pre-release)
+
+**Depends on:** Milestone 1 (MVP)
+
+### Deliverables
+
+#### Client-Provided Auth
+
+- [ ] New auth type: `auth.type: client`.
+- [ ] Fields: `header`, `forward`, `scheme`.
+- [ ] Extract token from incoming request.
+- [ ] Strip existing scheme, re-add configured scheme.
+- [ ] Set the forward header on the upstream request.
+- [ ] Return `401 CLIENT_AUTH_MISSING` if the header is absent.
+- [ ] Redact `Authorization` (and any custom auth headers) in structured logs.
+- [ ] Metric: `elegba_client_auth_missing_total{upstream}`.
+- [ ] Unit tests for each scheme variant (`Bearer`, `Basic`, `""`).
+- [ ] Integration test: token is forwarded to the mock upstream.
+
+#### Template Functions
+
+Add the following functions to `internal/transform/funcs.go`:
+
+- [ ] `dict` — build a map from key-value pairs.
+- [ ] `sha256` — hex-encoded SHA-256 of a string.
+- [ ] `replacePrefix` — remove a prefix from a string.
+- [ ] `redact` — redact a value for safe logging.
+- [ ] Unit tests for each function, including edge cases (empty input, unicode,
+      very long input).
+- [ ] Fuzz test: `FuzzTemplateRender` includes these functions.
+
+#### Worked Example
+
+- [ ] `examples/user-summary.yaml` — the full config from `DESIGN.md` §16.
+- [ ] `examples/mock/main.go` — mock upstreams for user, ledger, and account.
+- [ ] `examples/user-summary.md` — walkthrough of the example, including
+      expected output and failure modes.
+- [ ] `docker-compose.yml` — Elegba + three mock upstreams + Prometheus, so
+      the example runs with one command.
+- [ ] README quick-start uses this example.
+
+#### Cache Safety
+
+- [ ] Document the rule: cache keys MUST include a token hash when
+      `auth.type: client` is used.
+- [ ] Enforce at config load time: if `auth.type: client` is set on an
+      upstream used by a `fetch` step with a cache, and the cache key does
+      not contain the token (or a hash of it), fail with a clear error.
+- [ ] Test: two different tokens produce two different cache entries.
+
+#### Docs
+
+- [ ] `DESIGN.md` §16 added.
+- [ ] `docs/config-reference.md` — `auth.type: client` fully documented.
+- [ ] `docs/architecture.md` — new "Auth flow" section covering static,
+      client, and exchanged modes.
+- [ ] `docs/examples/user-summary.md` — step-by-step walkthrough.
+
+### Acceptance Criteria
+
+- A user can clone the repo, run `docker compose up`, and hit
+  `GET /users/42/summary` with a bearer token, receiving the exact response
+  from `DESIGN.md` §16.1.
+- Killing the account-service produces a response with the fallback values
+  instead of a 500.
+- Two different tokens produce two cache entries (verified via metrics).
+- Missing token returns `401 CLIENT_AUTH_MISSING`.
+- All tests pass with `-race` and `goleak`.
+- Coverage ≥ 85% on `internal/`.
+
+### Out of Scope
+
+- Token exchange (Milestone 7).
+- OAuth2 on-behalf-of flows (Milestone 7).
+- Multi-tenant auth (Milestone 8).
+
+### Why this milestone
+
+The MVP proves the DAG executor works. This milestone proves Elegba is
+*usable* as a BFF: real auth, real field mapping, real partial failures, real
+caching. Without it, the MVP is a demo, not a tool.
 
 ---
 
-## 6. Milestone 2 — Resilience
+## 7. Milestone 2 — Resilience
 
 **Goal:** Elegba survives upstream failures gracefully.
 
 **Target:** v0.2.0
 
-**Status:** Implementation complete.
-
 ### Deliverables
 
 #### Retries
 
-- [x] `retry` config per upstream.
-- [x] Exponential backoff with jitter (`cenkalti/backoff/v4`).
-- [x] Retry only idempotent methods (GET, HEAD, OPTIONS).
-- [x] Respect `Retry-After` on 429.
-- [x] Retry budget (`maxElapsedTime`).
+- [ ] `retry` config per upstream.
+- [ ] Exponential backoff with jitter (`cenkalti/backoff/v4`).
+- [ ] Retry only idempotent methods (GET, HEAD, OPTIONS).
+- [ ] Respect `Retry-After` on 429.
+- [ ] Retry budget (`maxElapsedTime`).
 
 #### Circuit Breaker
 
-- [x] `breaker` config per upstream.
-- [x] Three states: closed, open, half-open (`sony/gobreaker`).
-- [x] Configurable thresholds.
-- [x] Emit state transition events.
+- [ ] `breaker` config per upstream.
+- [ ] Three states: closed, open, half-open (`sony/gobreaker`).
+- [ ] Configurable thresholds.
+- [ ] Emit state transition events.
 
 #### Rate Limiting
 
-- [x] `rateLimit` config per upstream (`golang.org/x/time/rate`).
-- [x] Per-endpoint concurrency limit (`maxConcurrent`).
-- [x] 429 response with `Retry-After` header.
+- [ ] `rateLimit` config per upstream (`golang.org/x/time/rate`).
+- [ ] Per-endpoint concurrency limit (`maxConcurrent`).
+- [ ] 429 response with `Retry-After` header.
 
 #### Timeouts
 
-- [x] Per-upstream `timeout`.
-- [x] Per-endpoint `timeout`.
-- [x] Per-step timeout (derived).
-- [x] Slowloris protection (`ReadHeaderTimeout`, `ReadTimeout`,
+- [ ] Per-upstream `timeout`.
+- [ ] Per-endpoint `timeout`.
+- [ ] Per-step timeout (derived).
+- [ ] Slowloris protection (`ReadHeaderTimeout`, `ReadTimeout`,
       `WriteTimeout`, `IdleTimeout`).
 
 #### Partial Failure
 
-- [x] `failFast: false` collects errors per step.
-- [x] `_errors` field in response when partial failures occur.
-- [x] `onError: ignore` and `onError: fallback` per step.
-- [x] Fallback types: `static`, `upstream`, `cacheKey`.
+- [ ] `failFast: false` collects errors per step.
+- [ ] `_errors` field in response when partial failures occur.
+- [ ] `onError: ignore` and `onError: fallback` per step.
+- [ ] Fallback types: `static`, `upstream`, `cacheKey`.
 
 #### Errors
 
-- [x] Structured error responses with codes.
-- [x] Sentinel errors for `errors.Is`/`errors.As`.
-- [x] Error wrapping with context at each layer.
+- [ ] Structured error responses with codes.
+- [ ] Sentinel errors for `errors.Is`/`errors.As`.
+- [ ] Error wrapping with context at each layer.
 
 #### Tests
 
-- [x] Chaos tests: slow upstreams, 500s, timeouts, connection resets.
-- [x] Breaker state transition tests.
-- [x] Retry exhaustion tests.
-- [x] Partial failure integration tests.
+- [ ] Chaos tests: slow upstreams, 500s, timeouts, connection resets.
+- [ ] Breaker state transition tests.
+- [ ] Retry exhaustion tests.
+- [ ] Partial failure integration tests.
 
 ### Acceptance Criteria
 
@@ -311,6 +374,10 @@ endpoints:
 - Rate limits are enforced per upstream.
 - Partial failures return usable responses.
 - All chaos tests pass.
+- The worked example from Milestone 1.5 continues to pass with resilience
+  enabled (retries, breakers, rate limits).
+- Chaos tests include the worked example: kill each upstream in turn and
+  verify partial-failure behavior.
 
 ### Out of Scope
 
@@ -320,21 +387,19 @@ endpoints:
 
 ---
 
-## 7. Milestone 3 — Observability
+## 8. Milestone 3 — Observability
 
 **Goal:** Full observability for production operations.
 
 **Target:** v0.3.0
 
-**Status:** Implementation complete.
-
 ### Deliverables
 
 #### Metrics
 
-- [x] Prometheus integration (`prometheus/client_golang`).
-- [x] `/metrics` endpoint on admin server.
-- [x] Metrics:
+- [ ] Prometheus integration (`prometheus/client_golang`).
+- [ ] `/metrics` endpoint on admin server.
+- [ ] Metrics:
   - `elegba_requests_total{endpoint, method, status}`
   - `elegba_request_duration_seconds{endpoint}` (histogram)
   - `elegba_step_duration_seconds{endpoint, step, upstream}` (histogram)
@@ -342,45 +407,46 @@ endpoints:
   - `elegba_cache_hits_total{backend}`, `elegba_cache_misses_total{backend}`
   - `elegba_circuit_breaker_state{upstream}`
   - `elegba_inflight_requests{endpoint}`
+  - `elegba_client_auth_missing_total{upstream}`
 
 #### Tracing
 
-- [x] OpenTelemetry integration (`go.opentelemetry.io/otel`).
-- [x] OTLP exporter (configurable endpoint).
-- [x] Span per request, per step, per upstream call.
-- [x] `traceparent` propagation to upstreams.
+- [ ] OpenTelemetry integration (`go.opentelemetry.io/otel`).
+- [ ] OTLP exporter (configurable endpoint).
+- [ ] Span per request, per step, per upstream call.
+- [ ] `traceparent` propagation to upstreams.
 
 #### Logging
 
-- [x] Structured logging with `log/slog`.
-- [x] Correlation IDs (`request_id`) in every log.
-- [x] Log levels: `debug`, `info`, `warn`, `error`.
-- [x] Redaction of secrets (tokens, passwords, API keys).
+- [ ] Structured logging with `log/slog`.
+- [ ] Correlation IDs (`request_id`) in every log.
+- [ ] Log levels: `debug`, `info`, `warn`, `error`.
+- [ ] Redaction of secrets (tokens, passwords, API keys).
 
 #### Admin Server
 
-- [x] Separate admin port (`:9090` by default, disabled by default).
-- [x] `/metrics`, `/debug/pprof/*`, `/healthz`, `/readyz`.
-- [x] Configurable via `server.admin`.
+- [ ] Separate admin port (`:9090` by default, disabled by default).
+- [ ] `/metrics`, `/debug/pprof/*`, `/healthz`, `/readyz`.
+- [ ] Configurable via `server.admin`.
 
 #### Health Checks
 
-- [x] `/healthz` — liveness (process alive).
-- [x] `/readyz` — readiness (all upstreams reachable within timeout).
-- [x] Configurable `readinessTimeout`.
+- [ ] `/healthz` — liveness (process alive).
+- [ ] `/readyz` — readiness (all upstreams reachable within timeout).
+- [ ] Configurable `readinessTimeout`.
 
 #### Request ID
 
-- [x] ULID or UUIDv7 per request.
-- [x] Injected into context.
-- [x] Propagated as `X-Request-ID` to upstreams.
-- [x] Returned in response headers.
+- [ ] ULID or UUIDv7 per request.
+- [ ] Injected into context.
+- [ ] Propagated as `X-Request-ID` to upstreams.
+- [ ] Returned in response headers.
 
 #### Tests
 
-- [x] Metrics tests (counter increments, histogram buckets).
-- [x] Tracing tests (span hierarchy and OTLP export).
-- [x] Log format tests (JSON structure and redaction).
+- [ ] Metrics tests (counter increments, histogram buckets).
+- [ ] Tracing tests (span hierarchy).
+- [ ] Log format tests (JSON structure).
 
 ### Acceptance Criteria
 
@@ -396,53 +462,51 @@ endpoints:
 
 ---
 
-## 8. Milestone 4 — Caching
+## 9. Milestone 4 — Caching
 
 **Goal:** Flexible, multi-backend caching.
 
 **Target:** v0.4.0
 
-**Status:** Implementation complete.
-
 ### Deliverables
 
 #### Cache Interface
 
-- [x] `Cache` interface with context-aware `Get`, `Set`, `Delete`, `Close`.
-- [x] Cache registry with factory map.
-- [x] Cache errors are fail-open (logged, not fatal).
+- [ ] `Cache` interface with `Get`, `Set`, `Delete`, `Close`.
+- [ ] Cache registry with factory map.
+- [ ] Cache errors are fail-open (logged, not fatal).
 
 #### Backends
 
-- [x] In-memory backend (`ristretto`) — already in MVP.
-- [x] Redis backend (`go-redis/v9`).
-- [x] Connection pooling for Redis.
-- [x] TLS support for Redis.
+- [ ] In-memory backend (`ristretto`) — already in MVP.
+- [ ] Redis backend (`go-redis/v9`).
+- [ ] Connection pooling for Redis.
+- [ ] TLS support for Redis.
 
 #### Step-Level Caching
 
-- [x] `cache` config on `fetch` steps.
-- [x] Templated cache keys.
-- [x] Per-step TTL override.
-- [x] `staleWhileRevalidate` support.
+- [ ] `cache` config on `fetch` steps.
+- [ ] Templated cache keys.
+- [ ] Per-step TTL override.
+- [ ] `staleWhileRevalidate` support.
 
 #### Cache Step
 
-- [x] Explicit `cache` step with `action: get`, `set`, or `delete`.
-- [x] Use for invalidation on write endpoints.
+- [ ] Explicit `cache` step with `action: get` or `set`.
+- [ ] Use for invalidation on write endpoints.
 
 #### Invalidation
 
-- [x] `cacheInvalidate` on endpoints (before pipeline).
-- [x] `cache` step with `set` + short TTL for manual invalidation.
+- [ ] `cacheInvalidate` on endpoints (before pipeline).
+- [ ] `cache` step with `set` + short TTL for manual invalidation.
 
 #### Tests
 
-- [x] Cache hit/miss tests.
-- [x] TTL expiry tests.
-- [x] Stale-while-revalidate tests.
-- [x] Redis integration tests (via Miniredis).
-- [x] Cache failure (fail-open) tests.
+- [ ] Cache hit/miss tests.
+- [ ] TTL expiry tests.
+- [ ] Stale-while-revalidate tests.
+- [ ] Redis integration tests (via `testcontainers-go`).
+- [ ] Cache failure (fail-open) tests.
 
 ### Acceptance Criteria
 
@@ -460,7 +524,7 @@ endpoints:
 
 ---
 
-## 9. Milestone 5 — Hot Reload
+## 10. Milestone 5 — Hot Reload
 
 **Goal:** Reload config without dropping requests.
 
@@ -519,7 +583,7 @@ endpoints:
 
 ---
 
-## 10. Milestone 6 — v1.0 Release
+## 11. Milestone 6 — v1.0 Release
 
 **Goal:** Production-ready v1.0.
 
@@ -543,6 +607,7 @@ endpoints:
 #### Examples
 
 - [ ] `examples/elegba.yaml` — minimal config.
+- [ ] `examples/user-summary.yaml` — worked example (Milestone 1.5).
 - [ ] `examples/dashboard.yaml` — BFF dashboard pattern.
 - [ ] `examples/mobile-bff.yaml` — mobile BFF pattern.
 - [ ] `examples/microservice-composition.yaml` — service composition.
@@ -600,7 +665,7 @@ endpoints:
 
 ---
 
-## 11. Milestone 7 — v1.x Hardening
+## 12. Milestone 7 — v1.x Hardening
 
 **Goal:** Stabilize v1.x with community feedback.
 
@@ -624,6 +689,9 @@ endpoints:
 - [ ] Request/response body logging (opt-in).
 - [ ] Config linting CLI (`elegba lint --config ...`).
 - [ ] Config diff CLI (`elegba diff old.yaml new.yaml`).
+- [ ] Token exchange step pattern (client token → service token).
+- [ ] OAuth2 on-behalf-of (OBO) flow support.
+- [ ] Per-route auth overrides.
 
 #### Operations
 
@@ -647,7 +715,7 @@ endpoints:
 
 ---
 
-## 12. Milestone 8 — v2.0 Planning
+## 13. Milestone 8 — v2.0 Planning
 
 **Goal:** Plan the next major version.
 
@@ -723,7 +791,7 @@ All breaking changes will be documented in a migration guide.
 
 ---
 
-## 13. Beyond v2.0
+## 14. Beyond v2.0
 
 Long-term ideas, not commitments:
 
@@ -739,7 +807,7 @@ These are exploratory and will be evaluated based on community interest.
 
 ---
 
-## 14. Explicitly Out of Scope
+## 15. Explicitly Out of Scope
 
 The following are **not** planned for Elegba, at any version:
 
@@ -757,7 +825,7 @@ If you need these, consider KrakenD, Kong, or a full API gateway.
 
 ---
 
-## 15. How to Contribute
+## 16. How to Contribute
 
 Contributions are welcome at any milestone.
 
@@ -799,6 +867,7 @@ See `SECURITY.md`. Do not open a public issue.
 |-----------|---------|-------|--------|
 | 0 | — | Foundation | ✅ Complete |
 | 1 | v0.1.0 | MVP | 🚧 In progress |
+| 1.5 | v0.1.5 | Client Auth & Worked Example | ⏳ Planned |
 | 2 | v0.2.0 | Resilience | ⏳ Planned |
 | 3 | v0.3.0 | Observability | ⏳ Planned |
 | 4 | v0.4.0 | Caching | ⏳ Planned |
@@ -812,6 +881,7 @@ See `SECURITY.md`. Do not open a public issue.
 | Milestone | New dependencies |
 |-----------|------------------|
 | 1 | `gopkg.in/yaml.v3`, `golang.org/x/sync`, `github.com/dgraph-io/ristretto`, `github.com/go-playground/validator/v10`, `github.com/oklog/ulid/v2`, `github.com/oliveagle/jsonpath` |
+| 1.5 | None (stdlib `crypto/sha256`, `strings`) |
 | 2 | `github.com/cenkalti/backoff/v4`, `github.com/sony/gobreaker`, `golang.org/x/time/rate` |
 | 3 | `github.com/prometheus/client_golang`, `go.opentelemetry.io/otel`, `go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc` |
 | 4 | `github.com/redis/go-redis/v9` |
@@ -831,6 +901,8 @@ A milestone is done when:
 - [ ] No data races (`-race`).
 - [ ] Documentation is updated.
 - [ ] At least one example demonstrates the new feature.
+- [ ] The worked example from `DESIGN.md` §16 passes end to end via
+      `docker-compose`.
 - [ ] Release notes are written.
 - [ ] Binary and Docker image are published.
 

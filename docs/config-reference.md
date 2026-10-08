@@ -1,20 +1,11 @@
 # Elegba — Configuration Reference
 
-**Version:** 1.0
+**Version:** 1.1
 **Schema Version:** `"1"`
 **Applies to:** Elegba v1.x
 
 This document is the exhaustive reference for Elegba's configuration file.
 Every field, its type, default value, and behavior is documented here.
-
-The implementation currently supports strict YAML or JSON parsing,
-`${VAR}` and `${VAR:-default}` interpolation, server address/timeouts/body
-limits, named HTTP upstreams with bearer/basic/apikey auth, retries, circuit
-breakers, rate limiting, endpoint/step concurrency and timeouts, partial
-failures, fallbacks, named in-memory and Redis caches, and fetch/transform/cache steps.
-Prometheus metrics, an optional pprof/health admin listener, readiness probes,
-and optional OTLP HTTP tracing are also supported. Upstream/server TLS, CORS,
-and hot reload remain planned and are not accepted by the strict loader.
 
 ---
 
@@ -25,16 +16,15 @@ and hot reload remain planned and are not accepted by the strict loader.
 3. [Top-Level Structure](#3-top-level-structure)
 4. [`version`](#4-version)
 5. [`server`](#5-server)
-6. [`tracing`](#6-tracing)
-7. [`upstreams`](#7-upstreams)
-8. [`caches`](#8-caches)
-9. [`endpoints`](#9-endpoints)
-10. [Step Types](#10-step-types)
-11. [Template Functions](#11-template-functions)
-12. [Validation Rules](#12-validation-rules)
-13. [Hot Reload](#13-hot-reload)
-14. [Complete Example](#14-complete-example)
-15. [Migration Guide](#15-migration-guide)
+6. [`upstreams`](#6-upstreams)
+7. [`caches`](#7-caches)
+8. [`endpoints`](#8-endpoints)
+9. [Step Types](#9-step-types)
+10. [Template Functions](#10-template-functions)
+11. [Validation Rules](#11-validation-rules)
+12. [Hot Reload](#12-hot-reload)
+13. [Complete Example](#13-complete-example)
+14. [Migration Guide](#14-migration-guide)
 
 ---
 
@@ -106,6 +96,11 @@ part of interpolation:
 | `ELEGBA_ADMIN_ADDR` | Admin server address (overrides config). | — |
 | `ELEGBA_CONFIG_MAX_BYTES` | Max config file size. | `10485760` (10 MB) |
 | `ELEGBA_SHUTDOWN_TIMEOUT` | Graceful shutdown timeout. | `30s` |
+| `ELEGBA_HOT_RELOAD` | Enable hot reload. | `true` |
+| `ELEGBA_HOT_RELOAD_DEBOUNCE` | Debounce interval. | `500ms` |
+| `ELEGBA_CACHE_BACKEND` | `ristretto` or `bigcache`. | `ristretto` |
+| `ELEGBA_OTEL_ENDPOINT` | OTLP endpoint. | — |
+| `ELEGBA_OTEL_INSECURE` | Use insecure OTLP. | `false` |
 
 ---
 
@@ -117,20 +112,17 @@ version: "1"
 server:
   # see §5
 
-tracing:
+upstreams:
   # see §6
 
-upstreams:
+caches:
   # see §7
 
-caches:
-  # see §8
-
 endpoints:
-  # see §9
+  # see §8
 ```
 
-The configuration sections are optional at the schema level, but Elegba refuses to
+All four sections are optional at the schema level, but Elegba refuses to
 start if there are no `endpoints` defined (nothing to serve) or if an endpoint
 references an upstream that is not defined.
 
@@ -169,17 +161,20 @@ server:
   idleTimeout: 120s
   readHeaderTimeout: 5s
   shutdownTimeout: 30s
-  readinessTimeout: 5s
   maxBodyBytes: 1048576
+  tls:
+    certFile: /etc/elegba/tls/cert.pem
+    keyFile: /etc/elegba/tls/key.pem
+  cors:
+    allowedOrigins: ["https://app.example.com"]
+    allowedMethods: ["GET", "POST"]
+    allowedHeaders: ["Authorization", "Content-Type"]
+    exposedHeaders: ["X-Request-ID"]
+    allowCredentials: true
+    maxAge: 600s
   admin:
     address: ":9090"
     enabled: false
-
-tracing:
-  enabled: false
-  endpoint: http://localhost:4318
-  insecure: true
-  serviceName: elegba
 ```
 
 ### Fields
@@ -192,9 +187,36 @@ tracing:
 | `idleTimeout` | duration | no | `120s` | Max time to keep idle keep-alive connections. |
 | `readHeaderTimeout` | duration | no | `5s` | Max time to read request headers. Protects against slowloris. |
 | `shutdownTimeout` | duration | no | `30s` | Max time to drain in-flight requests on shutdown. |
-| `readinessTimeout` | duration | no | `5s` | Overall timeout for upstream readiness probes. |
 | `maxBodyBytes` | int64 | no | `1048576` (1 MB) | Max incoming request body size. |
-| `admin` | object | no | disabled | Separate metrics, pprof, and health listener (§5.3). |
+| `tls` | object | no | — | Server-side TLS config (§5.1). |
+| `cors` | object | no | — | CORS config (§5.2). |
+| `admin` | object | no | — | Admin server config (§5.3). |
+
+### 5.1 `server.tls`
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `certFile` | string | yes | — | Path to PEM-encoded certificate. |
+| `keyFile` | string | yes | — | Path to PEM-encoded private key. |
+| `minVersion` | string | no | `"1.2"` | Minimum TLS version (`"1.2"`, `"1.3"`). |
+| `clientCAFile` | string | no | — | Path to CA bundle for client cert verification (mTLS). |
+
+If `tls` is omitted, the server listens on plain HTTP. This is fine behind a
+TLS-terminating proxy but should be avoided for direct internet exposure.
+
+### 5.2 `server.cors`
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `allowedOrigins` | []string | no | `[]` | Origins allowed. Use `["*"]` for any (never with credentials). |
+| `allowedMethods` | []string | no | `["GET", "POST", "PUT", "DELETE", "OPTIONS"]` | Allowed HTTP methods. |
+| `allowedHeaders` | []string | no | `["Content-Type", "Authorization"]` | Request headers allowed. |
+| `exposedHeaders` | []string | no | `[]` | Response headers exposed to the browser. |
+| `allowCredentials` | bool | no | `false` | Whether to allow cookies/auth headers. |
+| `maxAge` | duration | no | `0s` | How long preflight responses are cached. |
+
+**Safety rule**: If `allowCredentials: true`, `allowedOrigins` must not
+contain `"*"`. Elegba fails at load time if both are set.
 
 ### 5.3 `server.admin`
 
@@ -209,28 +231,12 @@ The admin server exposes:
 - `/healthz` — liveness (also on the main server)
 - `/readyz` — readiness (also on the main server)
 
-The listener is disabled by default. **Security note**: pprof can expose
-process information; bind the admin address to a private interface and protect
-it with network policy.
-
-## 6. `tracing`
-
-Optional OpenTelemetry tracing exports spans using the OTLP/HTTP protocol.
-
-| Field | Type | Required | Default | Description |
-|-------|------|----------|---------|-------------|
-| `enabled` | bool | no | `false` | Enable OTLP trace export. |
-| `endpoint` | URL | required when enabled | — | Collector base URL, for example `http://localhost:4318`. |
-| `insecure` | bool | no | `false` | Use an insecure OTLP connection. HTTP endpoints always use cleartext. |
-| `serviceName` | string | no | `elegba` | OpenTelemetry `service.name` resource attribute. |
-
-`ELEGBA_OTEL_ENDPOINT` enables tracing and overrides `tracing.endpoint`;
-`ELEGBA_OTEL_INSECURE` overrides the `insecure` value. W3C Trace Context is
-extracted from incoming `traceparent` and propagated to upstreams.
+**Security note**: Bind the admin server to a private interface or protect it
+with network policy. Do not expose it publicly.
 
 ---
 
-## 7. `upstreams`
+## 6. `upstreams`
 
 Named upstream API clients. Each upstream is a fully configured HTTP (or
 future gRPC) client with its own transport, auth, resilience, and connection
@@ -258,8 +264,10 @@ upstreams:
       failureThreshold: 5
     rateLimit: 100/s
     auth:
-      type: bearer
-      token: ${USER_TOKEN}
+      type: client
+      header: Authorization
+      forward: Authorization
+      scheme: Bearer
     tls:
       caFile: /etc/elegba/ca.pem
       certFile: /etc/elegba/cert.pem
@@ -281,15 +289,15 @@ upstreams:
 | `maxResponseBytes` | int64 | no | `10485760` (10 MB) | Max response body size. |
 | `maxConcurrent` | int | no | `100` | Max concurrent requests. |
 | `retries` | int | no | `2` | Number of retry attempts (in addition to the first). |
-| `retry` | object | no | — | Retry policy (§7.1). |
-| `breaker` | object | no | — | Circuit breaker config (§7.2). |
+| `retry` | object | no | — | Retry policy (§6.1). |
+| `breaker` | object | no | — | Circuit breaker config (§6.2). |
 | `rateLimit` | string | no | — | Rate limit as `"N/duration"` (e.g., `"100/s"`). |
-| `auth` | object | no | — | Auth config (§7.3). |
-| `tls` | object | no | — | Per-upstream TLS config (§7.4). |
+| `auth` | object | no | — | Auth config (§6.3). |
+| `tls` | object | no | — | Per-upstream TLS config (§6.4). |
 | `headers` | map[string]string | no | `{}` | Static headers added to every request. |
-| `proxy` | object | no | — | Proxy config (§7.5). |
+| `proxy` | object | no | — | Proxy config (§6.5). |
 
-### 7.1 `upstreams.*.retry`
+### 6.1 `upstreams.*.retry`
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
@@ -303,11 +311,8 @@ upstreams:
 - Retries only for idempotent methods (GET, HEAD, OPTIONS) by default.
 - Retries on network errors, 5xx, 429 (respects `Retry-After`).
 - Does NOT retry on 4xx (except 429).
-- `retries` is the maximum number of attempts after the first request. The
-  default is `2`; set it to `0` to disable retries.
-- Rate-limit tokens and upstream concurrency slots apply to every attempt.
 
-### 7.2 `upstreams.*.breaker`
+### 6.2 `upstreams.*.breaker`
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
@@ -316,9 +321,9 @@ upstreams:
 | `timeout` | duration | no | `30s` | How long to stay in open state before half-open. |
 | `failureThreshold` | int | no | `5` | Consecutive failures to trip the breaker. |
 
-### 7.3 `upstreams.*.auth`
+### 6.3 `upstreams.*.auth`
 
-Supported `type` values: `bearer`, `basic`, `apikey`, `oauth2`.
+Supported `type` values: `bearer`, `basic`, `apikey`, `oauth2`, `client`.
 
 #### `type: bearer`
 
@@ -353,7 +358,47 @@ Supported `type` values: `bearer`, `basic`, `apikey`, `oauth2`.
 
 Tokens are cached and refreshed automatically before expiry.
 
-### 7.4 `upstreams.*.tls`
+#### `type: client`
+
+Forwards the client's token to the upstream. This is the standard pattern for
+BFFs that act on behalf of the calling user.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `header` | string | no | `"Authorization"` | Incoming header to read the token from. |
+| `forward` | string | no | same as `header` | Outgoing header to send. |
+| `scheme` | string | no | `"Bearer"` | Scheme prefix to apply. Set to `""` to forward verbatim. |
+
+**Behavior:**
+
+1. Extract `.header.<header>` from the incoming request.
+2. Strip the existing scheme prefix if present (e.g., `Bearer `).
+3. Re-add the configured `scheme` prefix.
+4. Set the `forward` header on the upstream request.
+5. If the client's header is missing → return `401 CLIENT_AUTH_MISSING`.
+
+**Example:**
+
+```yaml
+upstreams:
+  user-service:
+    baseURL: https://users.internal
+    auth:
+      type: client
+      header: Authorization
+      forward: Authorization
+      scheme: Bearer
+```
+
+**Security:**
+
+- Tokens are never logged; they are redacted in structured logs.
+- Cache keys MUST include a token hash when `auth.type: client` is used.
+  Elegba enforces this at config load time.
+- TLS MUST be enforced between Elegba and the upstream.
+- Do not forward a token to an upstream that should not see it.
+
+### 6.4 `upstreams.*.tls`
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
@@ -363,7 +408,7 @@ Tokens are cached and refreshed automatically before expiry.
 | `insecureSkipVerify` | bool | no | `false` | Skip server cert verification. **Not recommended.** |
 | `serverName` | string | no | — | Override SNI server name. |
 
-### 7.5 `upstreams.*.proxy`
+### 6.5 `upstreams.*.proxy`
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -371,7 +416,7 @@ Tokens are cached and refreshed automatically before expiry.
 
 ---
 
-## 8. `caches`
+## 7. `caches`
 
 Named cache backends. Each cache is a fully configured cache client.
 
@@ -384,36 +429,33 @@ caches:
   redis:
     type: redis
     address: localhost:6379
-    username: elegba
     password: ${REDIS_PASSWORD}
     db: 0
-    poolSize: 10
     defaultTTL: 300s
-    tls:
-      caFile: /etc/elegba/redis-ca.pem
+    poolSize: 10
 ```
 
 ### Fields (common)
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `type` | string | no | `"in-memory"` | Cache type: `"in-memory"` or `"redis"`. |
+| `type` | string | yes | — | Cache type: `"in-memory"` or `"redis"`. |
 | `defaultTTL` | duration | no | `60s` | Default TTL when a step doesn't specify one. |
 
-### 8.1 `type: in-memory`
+### 7.1 `type: in-memory`
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `maxSize` | int | no | `10000` | Max number of entries. |
-The in-memory backend uses Ristretto with one cost unit per entry; `maxSize`
-sets its maximum cost.
+| `maxCost` | int64 | no | `0` | Max cost (bytes) if using ristretto. `0` = unlimited. |
 
-### 8.2 `type: redis`
+Backed by `ristretto` (default) or `bigcache` (set `ELEGBA_CACHE_BACKEND=bigcache`).
+
+### 7.2 `type: redis`
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `address` | string | yes | — | Redis address (host:port). |
-| `username` | string | no | — | Redis ACL username. |
 | `password` | string | no | — | Redis password. Supports `${VAR}`. |
 | `db` | int | no | `0` | Redis database number. |
 | `poolSize` | int | no | `10` | Connection pool size. |
@@ -421,16 +463,11 @@ sets its maximum cost.
 | `dialTimeout` | duration | no | `5s` | Connection dial timeout. |
 | `readTimeout` | duration | no | `3s` | Read timeout. |
 | `writeTimeout` | duration | no | `3s` | Write timeout. |
-| `tls` | object | no | — | Redis TLS settings. |
-
-`tls` supports `caFile`, `certFile`, `keyFile`, `serverName`, and
-`insecureSkipVerify`. Client `certFile` and `keyFile` must be set together.
-Redis request-time errors are logged and treated as cache misses/write
-failures; they do not fail otherwise successful API requests.
+| `tls` | object | no | — | Redis TLS config (same shape as §6.4). |
 
 ---
 
-## 9. `endpoints`
+## 8. `endpoints`
 
 Incoming HTTP routes and their pipelines. Each endpoint defines a path, method,
 and a list of steps to execute.
@@ -455,7 +492,7 @@ endpoints:
         cache:
           backend: memory
           ttl: 60s
-          key: "user:{{ .query.userId }}"
+          key: "user:{{ .query.userId }}:{{ .header.Authorization | sha256 }}"
           staleWhileRevalidate: true
       - id: orders
         type: fetch
@@ -465,10 +502,10 @@ endpoints:
         type: transform
         dependsOn: [user, orders]
         template: |
-          {
-            "user": {{ .user | toJSON }},
-            "orderCount": {{ len .orders }}
-          }
+          {{ dict
+              "user" .user
+              "orderCount" (len .orders)
+            | toJSON }}
 ```
 
 ### Fields
@@ -480,8 +517,8 @@ endpoints:
 | `timeout` | duration | no | `10s` | Per-request timeout for the whole pipeline. |
 | `maxConcurrent` | int | no | `100` | Max concurrent requests for this endpoint. |
 | `failFast` | bool | no | `false` | If `true`, abort on first step failure. |
-| `cacheInvalidate` | []string | no | `[]` | Templated keys deleted from every configured backend before the pipeline runs. |
-| `pipeline` | []Step | yes | — | Ordered list of steps (see §10). |
+| `cacheInvalidate` | []string | no | `[]` | Cache keys to invalidate before pipeline runs. |
+| `pipeline` | []Step | yes | — | Ordered list of steps (see §9). |
 
 **Path parameters**: segments like `/users/{id}` are extracted into
 `{{ .path.id }}` in templates.
@@ -495,13 +532,9 @@ string).
 
 **Request ID**: available as `{{ .requestID }}`.
 
-At `maxConcurrent`, additional requests to an endpoint receive `429` with
-`Retry-After: 1`. Upstream concurrency limits wait for an available slot until
-the request context is canceled or times out.
-
 ---
 
-## 10. Step Types
+## 9. Step Types
 
 Each step has a `type` field that determines its behavior. All steps share
 these fields:
@@ -514,7 +547,7 @@ these fields:
 | `onError` | string | no | `"fail"` | Error handling: `fail`, `ignore`, `fallback`. |
 | `fallback` | object | no | — | Fallback config (if `onError: fallback`). |
 
-### 10.1 `type: fetch`
+### 9.1 `type: fetch`
 
 Calls an upstream API.
 
@@ -526,56 +559,51 @@ Calls an upstream API.
 | `headers` | map[string]string | no | `{}` | Additional headers (templated). |
 | `query` | map[string]string | no | `{}` | Additional query params (templated). |
 | `body` | string | no | — | Request body (templated). |
-| `cache` | object | no | — | Cache config for this step (§10.1.1). |
+| `cache` | object | no | — | Cache config for this step (§9.1.1). |
 
-#### 10.1.1 `fetch.cache`
+#### 9.1.1 `fetch.cache`
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `backend` | string | yes | — | Cache name from `caches`. |
 | `key` | string | yes | — | Cache key template. |
 | `ttl` | duration | no | backend default | TTL for this entry. |
-| `staleWhileRevalidate` | bool | no | `false` | Keep an additional TTL of stale data, serve it immediately, and coalesce background refreshes. |
+| `staleWhileRevalidate` | bool | no | `false` | Serve stale while refreshing. |
 
-### 10.2 `type: transform`
+**Cache safety rule**: When the upstream uses `auth.type: client`, the cache
+key MUST include a hash of the client token (e.g.,
+`{{ .header.Authorization | sha256 }}`). Elegba fails at config load time if
+this rule is violated.
+
+### 9.2 `type: transform`
 
 Renders a Go template using previous step outputs.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `template` | string | yes | Go template. See §11 for functions. |
+| `template` | string | yes | Go template. See §10 for functions. |
 
 The template receives all prior step outputs as top-level variables keyed by
 step ID.
 
-### 10.3 `type: cache`
+### 9.3 `type: cache`
 
-Explicit cache read, write, or delete (for use outside fetch steps).
+Explicit cache read or write (for use outside fetch steps).
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `action` | string | yes | `"get"`, `"set"`, or `"delete"`. |
+| `action` | string | yes | `"get"` or `"set"`. |
 | `backend` | string | yes | Cache name from `caches`. |
 | `key` | string | yes | Cache key template. |
-| `value` | string | no (required for `set`) | ID of the dependency step whose result to store. |
+| `value` | string | no (required for `set`) | Value template. |
 | `ttl` | duration | no | TTL for `set`. |
 
-Cache misses return `null`. Cache backend errors are logged and treated as
-misses or skipped writes/deletes so the request can continue.
-
-### 10.4 `onError` Behavior
+### 9.4 `onError` Behavior
 
 - `fail` (default): step failure aborts the pipeline if `failFast: true`,
-  otherwise records the error and continues. Failed dependencies are marked
-  complete, so downstream steps run and may themselves report an error if a
-  required value is missing.
+  otherwise records the error and continues.
 - `ignore`: step failure is silently ignored; the step's output is `null`.
 - `fallback`: step failure triggers the `fallback` config.
-
-When `failFast: false`, successful output is returned with `_errors`, keyed by
-step ID. Fatal errors use `{ "error": { "code", "message", "request_id" } }`.
-Public error messages are sanitized and do not include upstream response
-bodies.
 
 #### `fallback`
 
@@ -585,15 +613,11 @@ bodies.
 | `upstream` | string | no | Alternate upstream name. |
 | `cacheKey` | string | no | Alternate cache key. |
 
-Only one of `static`, `upstream`, or `cacheKey` may be set. `static` must be
-valid JSON. An `upstream` fallback repeats the fetch step's method, path,
-headers, and body against the alternate upstream. A `cacheKey` fallback checks
-configured in-memory caches in lexicographic backend-name order and uses the
-first matching entry.
+Only one of `static`, `upstream`, or `cacheKey` may be set.
 
 ---
 
-## 11. Template Functions
+## 10. Template Functions
 
 Templates use Go's `text/template` syntax with the following custom functions.
 
@@ -619,6 +643,7 @@ Templates use Go's `text/template` syntax with the following custom functions.
 | `toBase64` | Base64 encode. | `{{ .data \| toBase64 }}` |
 | `fromBase64` | Base64 decode. | `{{ .encoded \| fromBase64 }}` |
 | `urlEncode` | URL-encode a string. | `{{ .q \| urlEncode }}` |
+| `sha256` | Hex-encoded SHA-256. | `{{ .token \| sha256 }}` |
 
 ### Collections
 
@@ -632,6 +657,7 @@ Templates use Go's `text/template` syntax with the following custom functions.
 | `unique` | Deduplicate a slice. | `{{ unique .ids }}` |
 | `filter` | Filter a slice by field. | `{{ filter .orders "status" "paid" }}` |
 | `map` | Map a field from each element. | `{{ map .orders "id" }}` |
+| `dict` | Build a map from key-value pairs. | `{{ dict "a" 1 "b" 2 }}` |
 
 ### Math
 
@@ -652,9 +678,11 @@ Templates use Go's `text/template` syntax with the following custom functions.
 | `lower` | Lowercase. | `{{ lower .name }}` |
 | `trim` | Trim whitespace. | `{{ trim .name }}` |
 | `replace` | Replace substring. | `{{ replace .s "a" "b" }}` |
+| `replacePrefix` | Remove a prefix. | `{{ replacePrefix .s "Bearer " "" }}` |
 | `split` | Split string. | `{{ split .csv "," }}` |
 | `join` | Join slice. | `{{ join .ids "," }}` |
 | `contains` | Substring check. | `{{ contains .s "foo" }}` |
+| `redact` | Redact a value for logging. | `{{ redact .token }}` |
 
 ### Time
 
@@ -678,7 +706,7 @@ time. Use only with trusted config.
 
 ---
 
-## 12. Validation Rules
+## 11. Validation Rules
 
 Elegba validates the config at load time and fails fast with a clear error if
 any rule is violated.
@@ -703,9 +731,12 @@ any rule is violated.
 - Every upstream name must be unique.
 - `baseURL` must be a valid absolute URL with scheme `http` or `https`.
 - `transport` must be a known type.
-- `auth.type` must be a known type.
+- `auth.type` must be a known type (`bearer`, `basic`, `apikey`, `oauth2`,
+  `client`).
 - `rateLimit` must match `N/duration` format.
 - If `auth.type: oauth2`, `tokenURL` must be a valid URL.
+- If `auth.type: client` and the upstream is used by a cached `fetch` step,
+  the cache key must contain a token hash. See §9.1.1.
 
 ### Caches
 
@@ -733,7 +764,7 @@ any rule is violated.
 
 ---
 
-## 13. Hot Reload
+## 12. Hot Reload
 
 Elegba watches the config file for changes and reloads atomically.
 
@@ -764,7 +795,10 @@ Elegba watches the config file for changes and reloads atomically.
 
 ---
 
-## 14. Complete Example
+## 13. Complete Example
+
+This example is the canonical multi-upstream aggregation scenario, also
+documented in `DESIGN.md` §16 and available as `examples/user-summary.yaml`.
 
 ```yaml
 version: "1"
@@ -772,17 +806,11 @@ version: "1"
 server:
   address: ":8080"
   readTimeout: 5s
-  writeTimeout: 10s
+  writeTimeout: 15s
   idleTimeout: 120s
   readHeaderTimeout: 5s
   shutdownTimeout: 30s
   maxBodyBytes: 1048576
-  cors:
-    allowedOrigins: ["https://app.example.com"]
-    allowedMethods: ["GET", "POST"]
-    allowedHeaders: ["Authorization", "Content-Type"]
-    allowCredentials: true
-    maxAge: 600s
   admin:
     address: ":9090"
     enabled: true
@@ -790,129 +818,135 @@ server:
 upstreams:
   user-service:
     transport: http
-    baseURL: https://api.example.com
+    baseURL: ${USER_SERVICE_URL}
     timeout: 2s
-    maxResponseBytes: 10485760
     maxConcurrent: 100
     retries: 2
     retry:
       initialInterval: 100ms
-      maxInterval: 2s
+      maxInterval: 1s
       multiplier: 2.0
-      maxElapsedTime: 10s
+      maxElapsedTime: 5s
       jitter: true
     breaker:
       maxRequests: 5
       interval: 60s
       timeout: 30s
       failureThreshold: 5
-    rateLimit: 100/s
+    rateLimit: 200/s
     auth:
-      type: bearer
-      token: ${USER_TOKEN:?USER_TOKEN is required}
-    headers:
-      X-Client: elegba
+      type: client
+      header: Authorization
+      forward: Authorization
+      scheme: Bearer
 
-  order-service:
+  ledger-service:
     transport: http
-    baseURL: https://orders.example.com
+    baseURL: ${LEDGER_SERVICE_URL}
     timeout: 3s
-    maxConcurrent: 50
-    retries: 3
+    maxConcurrent: 100
+    retries: 2
+    breaker:
+      failureThreshold: 5
+    rateLimit: 200/s
     auth:
-      type: apikey
-      key: ${ORDER_API_KEY}
-      in: header
-      name: X-API-Key
+      type: client
+      header: Authorization
+      forward: Authorization
+      scheme: Bearer
+
+  account-service:
+    transport: http
+    baseURL: ${ACCOUNT_SERVICE_URL}
+    timeout: 2s
+    maxConcurrent: 100
+    retries: 3
+    breaker:
+      failureThreshold: 3
+    rateLimit: 200/s
+    auth:
+      type: client
+      header: Authorization
+      forward: Authorization
+      scheme: Bearer
 
 caches:
   memory:
     type: in-memory
     maxSize: 10000
     defaultTTL: 60s
-  redis:
-    type: redis
-    address: ${REDIS_ADDR:-localhost:6379}
-    password: ${REDIS_PASSWORD:-}
-    db: 0
-    defaultTTL: 300s
-    poolSize: 10
 
 endpoints:
-  - path: /dashboard
+  - path: /users/{userId}/summary
     method: GET
-    timeout: 10s
-    maxConcurrent: 100
+    timeout: 8s
+    maxConcurrent: 200
     failFast: false
     pipeline:
       - id: user
         type: fetch
         upstream: user-service
-        path: /users/{{ .query.userId }}
+        path: /users/{{ .path.userId }}
         method: GET
-        headers:
-          X-Trace: "{{ .requestID }}"
         cache:
           backend: memory
+          key: "user:{{ .path.userId }}:{{ .header.Authorization | sha256 }}"
           ttl: 60s
-          key: "user:{{ .query.userId }}"
           staleWhileRevalidate: true
 
-      - id: orders
+      - id: ledger
         type: fetch
-        upstream: order-service
-        path: /orders
+        upstream: ledger-service
+        path: /ledger/accounts/{{ .path.userId }}
         method: GET
-        query:
-          userId: "{{ .query.userId }}"
+
+      - id: account
+        type: fetch
+        upstream: account-service
+        path: /accounts/{{ .path.userId }}/flags
+        method: GET
         onError: fallback
         fallback:
-          static: "[]"
+          static: '{"has_pnd": false, "has_lien": false}'
 
-      - id: combined
+      - id: summary
         type: transform
-        dependsOn: [user, orders]
+        dependsOn: [user, ledger, account]
         template: |
-          {
-            "user": {{ .user | toJSON }},
-            "orderCount": {{ len .orders }},
-            "total": {{ sum .orders "amount" }},
-            "generatedAt": "{{ now }}"
-          }
+          {{ dict
+              "user_id"            .user.id
+              "user_status"        .user.user_status
+              "user_onboarded_on"  .user.date_create
+              "account_balance"    .ledger.ledger_balance
+              "account_has_pnd"    .account.has_pnd
+              "account_has_lien"   .account.has_lien
+            | toJSON }}
+```
 
-  - path: /users/{id}
-    method: GET
-    pipeline:
-      - id: user
-        type: fetch
-        upstream: user-service
-        path: /users/{{ .path.id }}
-        cache:
-          backend: redis
-          ttl: 300s
-          key: "user:{{ .path.id }}"
+### Expected request
 
-  - path: /users/{id}
-    method: DELETE
-    pipeline:
-      - id: invalidate
-        type: cache
-        action: set
-        backend: redis
-        key: "user:{{ .path.id }}"
-        value: "null"
-        ttl: 1s
-      - id: delete
-        type: fetch
-        upstream: user-service
-        path: /users/{{ .path.id }}
-        method: DELETE
-        dependsOn: [invalidate]
+```bash
+curl -s http://localhost:8080/users/42/summary \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
+  | jq
+```
+
+### Expected response
+
+```json
+{
+  "user_id": 42,
+  "user_status": "ACTIVE",
+  "user_onboarded_on": "2024-03-15T10:22:00Z",
+  "account_balance": 1580.42,
+  "account_has_pnd": false,
+  "account_has_lien": true
+}
 ```
 
 ---
 
-## 15. Migration Guide
+## 14. Migration Guide
 
 ### From v0 (pre-release) to v1
 
@@ -924,6 +958,16 @@ endpoints:
 - `cache.ttl` moved from a top-level cache field to per-step config.
 - `auth.token` now supports `${VAR}` interpolation. If you used literal
   `${...}` before, escape with `$${...}`.
+
+### From v1.0 to v1.1
+
+- New auth type: `auth.type: client`. No changes required for existing
+  configs.
+- New template functions: `dict`, `sha256`, `replacePrefix`, `redact`. No
+  changes required for existing configs.
+- Cache safety rule enforced: if `auth.type: client` is used on a cached
+  `fetch` step, the cache key must contain a token hash. Existing configs that
+  don't use `auth.type: client` are unaffected.
 
 ### Future Schema Versions
 
@@ -990,6 +1034,7 @@ Elegba returns structured errors in JSON:
 | `METHOD_NOT_ALLOWED` | 405 | Path matches but method does not. |
 | `REQUEST_TOO_LARGE` | 413 | Request body exceeds `maxBodyBytes`. |
 | `RATE_LIMITED` | 429 | Endpoint-level concurrency or rate limit exceeded. |
+| `CLIENT_AUTH_MISSING` | 401 | Client auth header required by upstream is missing. |
 | `UPSTREAM_TIMEOUT` | 504 | Upstream timed out. |
 | `UPSTREAM_ERROR` | 502 | Upstream returned 5xx or network error. |
 | `UPSTREAM_UNAVAILABLE` | 503 | Circuit breaker is open. |
